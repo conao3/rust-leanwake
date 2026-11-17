@@ -552,7 +552,7 @@ fn child_process_dies_when_host_is_killed() {
     std::fs::write(
         &fake_lean,
         format!(
-            "#!{}\necho $$ > \"$LEANWAKE_TEST_PID\"\nexec sleep 60\n",
+            "#!{}\necho $$ > \"$LEANWAKE_TEST_PID\"\nexec sleep 3600\n",
             shell.trim()
         ),
     )
@@ -570,7 +570,7 @@ fn child_process_dies_when_host_is_killed() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(120);
     let pid = loop {
         if let Ok(text) = std::fs::read_to_string(&pid_file)
             && let Ok(pid) = text.trim().parse::<i32>()
@@ -594,7 +594,7 @@ fn child_process_dies_when_host_is_killed() {
             })
             .unwrap_or(false)
     };
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(30);
     while running() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(10));
     }

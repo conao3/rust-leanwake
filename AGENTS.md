@@ -8,8 +8,16 @@ newline. Environment variables used by the host are required inputs.
 Run `nix develop --command make check` and
 `nix build --option cores 4 --max-jobs 1`. Run `nix fmt`, inspect the staged diff
 and commit each completed unit. Add new Lean and Nix files to Git before using
-Nix. On Linux, use `taskset -c 0-3` around builds and benchmark commands to limit
-the entire process tree to four cores. Use `cargo -j 4` for Rust builds.
+Nix. Limit local builds and benchmarks to at most four available CPUs. Use
+`cargo -j 4` for Rust builds. Tests and CI must not require fixed CPU numbers.
+
+Enable the repository's pre-commit check with `git config core.hooksPath .githooks`.
+The hook runs `nix develop --command make check`. CI runs the same check and
+`nix build` on pushes to master and pull requests. Keep action version tags in
+`.github/workflows/ci.yml` and update their commits through `gh actions-lock
+--no-interactive`; verify with `gh actions-lock --verify` and commit the workflow
+and `actions.lock` together. Dependabot groups weekly minor and patch updates
+for Cargo and GitHub Actions.
 
 ## Responsibilities
 
@@ -126,7 +134,10 @@ Tests check repeatability, source hashing, duplicate examples, names, module
 paths, plugins, configuration mutations, heartbeat limits, syntax errors,
 continued recording after failed imports, explicit hidden paths and symlink
 ancestors, all help levels, exit codes, PascalCase and file/stdin inputs.
-The Linux process test kills the host and checks that its child also dies.
+The Linux process test waits for the child's PID readiness signal, kills the
+host, and polls process state until the child dies. Its 120-second startup and
+30-second termination deadlines are watchdogs, not expected execution times.
+The long-running child cannot exit normally within either watchdog interval.
 Unsupported toolchains and unsupported compiler arguments fail rather
 than silently changing the execution conditions.
 
@@ -203,7 +214,6 @@ Missing sides of added or removed commands are JSON null; their delta uses zero
 for that side. Ranges come from head when present and from base for removals.
 Omit unchanged rows and order regressions first by descending delta, then use
 status, descending delta, path and key for deterministic output.
-
 
 ## Step acceptance tests
 
