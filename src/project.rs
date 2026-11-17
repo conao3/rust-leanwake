@@ -198,6 +198,7 @@ fn measure(
     adapter: &Path,
     environment: &HashMap<String, String>,
     file: &Prepared,
+    options: &Record,
 ) -> Result<File> {
     let Some(setup) = &file.setup else {
         return Ok(File {
@@ -209,7 +210,8 @@ fn measure(
             commands: Vec::new(),
         });
     };
-    let request = json!({"path": file.path, "setup": setup, "arguments": file.metadata.arguments});
+    let request = json!({"path": file.path, "setup": setup, "arguments": file.metadata.arguments,
+        "detail": options.detail.as_str(), "stepThresholdHeartbeats": options.step_threshold_heartbeats});
     let mut input = serde_json::to_vec(&request)?;
     input.push(b'\n');
     let output = process::run(
@@ -223,7 +225,7 @@ fn measure(
             String::from_utf8_lossy(&output.stderr)
         )));
     }
-    let measured: File = serde_json::from_slice(&output.stdout)
+    let measured: File = crate::json_io::read(&output.stdout)
         .map_err(|e| Error::internal(format!("invalid adapter response for {}: {e}", file.path)))?;
     if measured.has_errors {
         eprint!("{}", String::from_utf8_lossy(&output.stderr));
@@ -275,7 +277,7 @@ pub fn record(options: &Record) -> Result<Profile> {
                     let Some(file) = files.get(index) else {
                         break;
                     };
-                    let result = measure(&root, &adapter, &environment, file);
+                    let result = measure(&root, &adapter, &environment, file, options);
                     results.lock().unwrap().push((index, result));
                 }
             });
@@ -298,7 +300,7 @@ pub fn record(options: &Record) -> Result<Profile> {
         toolchain: version.trim().into(),
         conditions: Conditions {
             r#async: false,
-            detail: "none".into(),
+            detail: options.detail.as_str().into(),
         },
         files,
     })

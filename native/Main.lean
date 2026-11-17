@@ -7,12 +7,21 @@ structure Request where
   path : String
   setup : ModuleSetup
   arguments : Array String
+  detail : String
+  stepThresholdHeartbeats : Nat
   deriving FromJson
 
 def positionJson (p : Position) : Json :=
   Json.mkObj [("Line", toJson p.line), ("Column", toJson p.column)]
 
-def forceSynchronous (env : Environment) : Environment :=
+def measurementOptions (steps : Bool) (opts : Options) : Options :=
+  let opts := opts.setBool `Elab.async false
+  if steps then
+    opts.setBool `trace.profiler true |>.set `trace.profiler.threshold (0 : Nat)
+      |>.setBool `trace.profiler.useHeartbeats true |>.set `trace.profiler.output ""
+  else opts
+
+def forceSynchronous (steps : Bool) (env : Environment) : Environment :=
   Command.commandElabAttribute.ext.modifyState env fun s =>
     { s with table := s.table.fold (init := {}) fun table kind entries =>
       table.insert kind (entries.map fun entry =>
@@ -20,8 +29,65 @@ def forceSynchronous (env : Environment) : Environment :=
           { entry with value := fun stx => do
             entry.value stx
             Command.modifyScope fun scope =>
-              { scope with opts := scope.opts.setBool `Elab.async false } }
+              { scope with opts := measurementOptions steps scope.opts } }
         else entry) }
+
+def wrapSourceTactic (original : Tactic.Tactic) : Tactic.Tactic := fun stx =>
+  withTraceNode `Leanwake.tactic
+    (fun _ => pure (.ofOriginatingSyntax stx (MessageData.ofSyntax stx)))
+    (original stx) (tag := stx.getKind.toString)
+
+initialize wrappedTactics : SimpleScopedEnvExtension Name (PHashSet Name) ←
+  registerSimpleScopedEnvExtension { initial := {}, addEntry := (·.insert ·) }
+
+def instrumentTactics (env : Environment) : Environment := Id.run do
+  let wrapped := wrappedTactics.getState env
+  let mut names := wrapped
+  let state := Tactic.tacticElabAttribute.ext.getState env
+  for entry in state.table.fold (init := []) (fun entries _ es => es ++ entries) do
+    names := names.insert entry.declName
+  let env := Tactic.tacticElabAttribute.ext.modifyState env fun s =>
+    { s with table := s.table.fold (init := {}) fun table kind entries =>
+      table.insert kind (entries.map fun entry =>
+        if wrapped.contains entry.declName then entry else
+          { entry with value := wrapSourceTactic entry.value }) }
+  return wrappedTactics.modifyState env fun _ => names
+
+def syntaxRange (fm : FileMap) (stx : Syntax) : Json :=
+  match stx.getPos?, stx.getTailPos? with
+  | some start, some stop => Json.mkObj [
+      ("Start", positionJson (fm.toPosition start)),
+      ("End", positionJson (fm.toPosition stop))]
+  | _, _ => Json.null
+
+partial def originatingSyntax : MessageData → Option Syntax
+  | .ofOriginatingSyntax stx _ => some stx
+  | .withContext _ msg | .withNamingContext _ msg | .nest _ msg | .group msg
+    | .tagged _ msg | .ofWidget _ msg => originatingSyntax msg
+  | _ => none
+
+partial def traceJson (fm : FileMap) (threshold : Nat) (origin : Option Syntax) :
+    MessageData → Array Json
+  | .trace data msg children => Id.run do
+    let children := children.flatMap (traceJson fm threshold none)
+    let heartbeats := (data.stopTime - data.startTime).toUInt64.toNat
+    if heartbeats < threshold then return children
+    let stx := (originatingSyntax msg).or origin
+    let fields := [
+      ("Class", toJson data.cls.toString), ("Heartbeats", toJson heartbeats),
+      ("Range", stx.map (syntaxRange fm) |>.getD Json.null),
+      ("Children", toJson children)]
+    let fields := if data.cls == `Leanwake.tactic then
+      fields ++ [("Kind", toJson data.tag)] else fields
+    return #[Json.mkObj fields]
+  | .ofOriginatingSyntax stx msg => traceJson fm threshold (some stx) msg
+  | .withContext _ msg | .withNamingContext _ msg | .nest _ msg | .group msg
+    | .tagged _ msg | .ofWidget _ msg => traceJson fm threshold origin msg
+  | .compose a b => traceJson fm threshold origin a ++ traceJson fm threshold origin b
+  | _ => #[]
+
+def stateSteps (fm : FileMap) (threshold : Nat) (state : TraceState) : Array Json :=
+  state.traces.toArray.flatMap fun trace => traceJson fm threshold (some trace.ref) trace.msg
 
 def collectNames (before after : Environment) : Array String := Id.run do
   let mut names : Array (Name × DeclarationRanges) := #[]
@@ -34,15 +100,19 @@ def collectNames (before after : Environment) : Array String := Id.run do
     else a.2.range.pos.line < b.2.range.pos.line || (a.2.range.pos.line == b.2.range.pos.line && a.2.range.pos.column < b.2.range.pos.column)
   return names.map (·.1.toString)
 
-def measureCommands (path input : String) : FrontendM (Array Json × Bool) := do
+def measureCommands (path input : String) (steps : Bool) (threshold : Nat) :
+    FrontendM (Array Json × Bool) := do
   let mut rows := #[]
   let mut failed := false
   let mut occurrences : Std.HashMap (String × String) Nat := {}
   repeat
+    if steps then
+      modify fun s => { s with commandState := { s.commandState with
+        env := instrumentTactics s.commandState.env } }
     modify fun s => { s with commandState := { s.commandState with
       messages := {}, snapshotTasks := #[], traceState := {},
       scopes := s.commandState.scopes.map fun scope =>
-        { scope with opts := scope.opts.setBool `Elab.async false } } }
+        { scope with opts := measurementOptions steps scope.opts } } }
     updateCmdPos
     let cs ← getCommandState
     let ictx ← getInputContext
@@ -59,9 +129,11 @@ def measureCommands (path input : String) : FrontendM (Array Json × Bool) := do
     let h1 ← IO.getNumHeartbeats
     let state ← getCommandState
     let mut diagnostics := messages ++ state.messages
+    let mut traces := if steps then stateSteps ictx.fileMap threshold state.traceState else #[]
     for task in state.snapshotTasks do
       for snapshot in task.get.getAll do
         diagnostics := diagnostics ++ snapshot.diagnostics.msgLog
+        if steps then traces := traces ++ stateSteps ictx.fileMap threshold snapshot.traces
     let hasErrors := diagnostics.hasErrors
     failed := failed || hasErrors
     for message in diagnostics.toList do IO.eprintln (← message.toString)
@@ -75,12 +147,13 @@ def measureCommands (path input : String) : FrontendM (Array Json × Bool) := do
     occurrences := occurrences.insert (kind, source) occurrence
     let key := if let some name := names[0]? then name else
       s!"{path}::{kind.splitOn "." |>.getLast!}:{(Leanwake.sha256 source).take 12}#{occurrence}"
-    rows := rows.push <| Json.mkObj [
+    let fields := [
       ("Key", toJson key), ("Kind", toJson kind), ("Names", toJson names),
       ("Range", Json.mkObj [("Start", positionJson (ictx.fileMap.toPosition start)),
         ("End", positionJson (ictx.fileMap.toPosition stop))]),
       ("Heartbeats", toJson (h1 - h0)), ("ElapsedNs", toJson (t1 - t0)),
       ("HasErrors", toJson hasErrors)]
+    rows := rows.push <| Json.mkObj (if steps then fields ++ [("Steps", toJson traces)] else fields)
     if Parser.isTerminalCommand cmd then break
   return (rows, failed)
 
@@ -95,6 +168,9 @@ def setConfigOption (opts : Options) (arg : String) : IO Options := do
     pure (opts.set name value)
 
 unsafe def profile (req : Request) : IO Json := do
+  unless req.detail == "none" || req.detail == "steps" do
+    throw <| IO.userError s!"unsupported detail: {req.detail}"
+  let steps := req.detail == "steps"
   let some sysroot ← IO.getEnv "LEAN_SYSROOT" | throw <| IO.userError "LEAN_SYSROOT is required"
   initSearchPath sysroot
   enableInitializersExecution
@@ -107,7 +183,7 @@ unsafe def profile (req : Request) : IO Json := do
     else
       throw <| IO.userError s!"unsupported Lake Lean argument: {arg}"
   opts := opts.mergeBy (fun _ _ value => value) req.setup.options.toOptions
-  opts := opts.setBool `Elab.async false
+  opts := measurementOptions steps opts
   let (header, ps, messages) ← Parser.parseHeader ictx
   let header : HeaderSyntax := header
   let start ← IO.monoNanosNow
@@ -122,8 +198,9 @@ unsafe def profile (req : Request) : IO Json := do
       for message in messages.toList do IO.eprintln (← message.toString)
       pure (#[], true)
     else do
-      let (result, _) ← (measureCommands req.path input).run { inputCtx := ictx } |>.run {
-        commandState := Command.mkState (forceSynchronous env) messages opts,
+      let (result, _) ← (measureCommands req.path input steps req.stepThresholdHeartbeats).run
+        { inputCtx := ictx } |>.run {
+        commandState := Command.mkState (forceSynchronous steps env) messages opts,
         parserState := ps, cmdPos := ps.pos }
       pure result
   return Json.mkObj [("Path", toJson req.path), ("Module", toJson req.setup.name.toString),

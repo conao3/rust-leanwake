@@ -36,6 +36,25 @@ fn output(input: &str) -> Result<Output, String> {
     Output::from_str(value(input)?.trim(), false)
 }
 
+fn detail(input: &str) -> Result<Detail, String> {
+    Detail::from_str(value(input)?.trim(), false)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Detail {
+    None,
+    Steps,
+}
+
+impl Detail {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Steps => "steps",
+        }
+    }
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 pub enum Output {
     Json,
@@ -80,6 +99,17 @@ pub enum ProfileCommand {
         #[arg(long, value_parser = positive)]
         limit: Option<usize>,
     },
+    #[command(about = "List a command's trace nodes in descending heartbeat order")]
+    ListSteps {
+        #[arg(long, value_parser = value)]
+        profile: String,
+        #[arg(long, value_parser = value)]
+        path: String,
+        #[arg(long, value_parser = value)]
+        key: String,
+        #[arg(long, value_parser = positive)]
+        limit: Option<usize>,
+    },
     #[command(about = "Compare profiles using verified heartbeat rules")]
     CompareProfiles(Compare),
     #[command(about = "List totals for each file")]
@@ -99,6 +129,10 @@ pub struct Record {
     pub output_file: Option<PathBuf>,
     #[arg(long, default_value = "1", value_parser = positive)]
     pub jobs: usize,
+    #[arg(long, default_value = "none", value_parser = detail)]
+    pub detail: Detail,
+    #[arg(long, default_value = "1000", value_parser = natural)]
+    pub step_threshold_heartbeats: u64,
 }
 
 #[derive(Args)]

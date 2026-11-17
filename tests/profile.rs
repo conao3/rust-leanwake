@@ -105,6 +105,7 @@ fn help_and_syntax_follow_the_command_tree() {
         vec!["profile", "record-profile", "help"],
         vec!["profile", "list-commands", "help"],
         vec!["profile", "list-files", "help"],
+        vec!["profile", "list-steps", "help"],
         vec!["--version"],
         vec!["profile", "--version"],
     ] {
@@ -129,7 +130,7 @@ fn help_and_syntax_follow_the_command_tree() {
             "--project-dir",
             ".",
             "--detail",
-            "steps",
+            "unknown",
         ],
         vec!["profile", "list-files", "bare.json"],
         vec!["profile", "list-files", "--profile", "{}"],
@@ -236,6 +237,7 @@ fn records_are_deterministic_and_preserve_lake_configuration() {
     assert!(keys[0].contains(&hash[..12]));
     for row in rows {
         assert_eq!(row["HasErrors"], false);
+        assert!(row.get("Steps").is_none());
         if !row["Names"].as_array().unwrap().is_empty() {
             assert_eq!(row["Key"], row["Names"][0]);
         }
@@ -604,8 +606,18 @@ fn child_process_dies_when_host_is_killed() {
 }
 
 fn compare(base: &Value, head: &Value, options: &[&str]) -> Output {
-    let base = base.to_string();
-    let head = head.to_string();
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!(
+            "compare-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed),
+        ));
+    std::fs::create_dir_all(&directory).unwrap();
+    std::fs::write(directory.join("base.json"), base.to_string()).unwrap();
+    std::fs::write(directory.join("head.json"), head.to_string()).unwrap();
+    let base = format!("file://{}", directory.join("base.json").display());
+    let head = format!("file://{}", directory.join("head.json").display());
     let mut args = vec![
         "profile",
         "compare-profiles",
@@ -615,7 +627,9 @@ fn compare(base: &Value, head: &Value, options: &[&str]) -> Output {
         &head,
     ];
     args.extend_from_slice(options);
-    cli(&args)
+    let output = cli(&args);
+    std::fs::remove_dir_all(directory).unwrap();
+    output
 }
 
 fn comparison(base: &Value, head: &Value, options: &[&str], code: i32) -> Value {
@@ -939,4 +953,267 @@ fn recorded_changes_isolate_the_heavier_theorem_and_track_declarations() {
         serde_json::from_slice::<Value>(&output.stdout).unwrap(),
         result
     );
+}
+
+fn flatten_steps(nodes: &[Value]) -> Vec<&Value> {
+    nodes
+        .iter()
+        .flat_map(|node| {
+            std::iter::once(node).chain(flatten_steps(node["Children"].as_array().unwrap()))
+        })
+        .collect()
+}
+
+fn record_steps(root: &Path, threshold: &str) -> Value {
+    let output = cli(&[
+        "profile",
+        "record-profile",
+        "--project-dir",
+        root.to_str().unwrap(),
+        "--detail",
+        "steps",
+        "--step-threshold-heartbeats",
+        threshold,
+    ]);
+    assert_code(&output, 0);
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn steps_preserve_tactic_locations_kinds_and_repeatable_heartbeats() {
+    let root = fixture("steps");
+    assert_code(&lake_build(&root), 0);
+    let first = record_steps(&root, "0");
+    let second = record_steps(&root, "0");
+    pascal_case(&first);
+    assert_eq!(
+        first["Conditions"],
+        json!({"Async": false, "Detail": "steps"})
+    );
+    let signature = |profile: &Value| {
+        commands(profile)
+            .iter()
+            .map(|row| {
+                (
+                    row["Key"].clone(),
+                    row["Heartbeats"].clone(),
+                    row["Steps"].clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(signature(&first), signature(&second));
+    let rows = commands(&first);
+    let repeated = rows.iter().find(|row| row["Key"] == "repeated").unwrap();
+    let nodes = flatten_steps(repeated["Steps"].as_array().unwrap());
+    let simp: Vec<_> = nodes
+        .iter()
+        .filter(|node| {
+            node["Class"] == "Leanwake.tactic" && node["Kind"] == "Lean.Parser.Tactic.simp"
+        })
+        .collect();
+    assert_eq!(simp.len(), 2);
+    for (node, line) in simp.iter().zip([5, 6]) {
+        assert_eq!(
+            node["Range"],
+            json!({
+                "Start": {"Line": line, "Column": 4},
+                "End": {"Line": line, "Column": 28},
+            })
+        );
+        assert!(node["Heartbeats"].as_u64().unwrap() > 0);
+    }
+    assert!(nodes.iter().any(|node| node["Range"].is_null()));
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node["Class"] == "Meta.synthInstance")
+    );
+    for key in [
+        "configured",
+        "afterOption",
+        "locallyDefined",
+        "simplifyMany",
+    ] {
+        let row = rows.iter().find(|row| row["Key"] == key).unwrap();
+        let nodes = flatten_steps(row["Steps"].as_array().unwrap());
+        assert!(
+            nodes.iter().any(|node| {
+                node["Class"] == "Leanwake.tactic"
+                    && !node["Range"].is_null()
+                    && node["Heartbeats"].as_u64().unwrap() > 0
+            }),
+            "missing tactic trace for {key}"
+        );
+        if key == "locallyDefined" {
+            assert!(nodes.iter().any(|node| {
+                node["Kind"]
+                    .as_str()
+                    .is_some_and(|kind| kind.contains("LocalClose"))
+            }));
+        }
+    }
+    let conditional = rows
+        .iter()
+        .find(|row| row["Key"] == "simplifyConditional")
+        .unwrap();
+    assert!(
+        flatten_steps(conditional["Steps"].as_array().unwrap())
+            .iter()
+            .any(|node| {
+                node["Class"] == "Meta.Tactic.simp.discharge"
+                    && node["Heartbeats"].as_u64().unwrap() > 0
+            })
+    );
+    let comparison = comparison(&first, &second, &[], 0);
+    assert_eq!(comparison["Summary"]["Regressed"], 0);
+    assert_eq!(comparison["Summary"]["Improved"], 0);
+    let none = record(&root, 0);
+    assert!(commands(&none).iter().all(|row| row.get("Steps").is_none()));
+    assert_code(&compare(&none, &first, &[]), 254);
+    assert_code(&compare(&first, &none, &[]), 254);
+    let filtered = record_steps(&root, "1000");
+    for (full, filtered) in commands(&first).iter().zip(commands(&filtered)) {
+        assert_eq!(full["Key"], filtered["Key"]);
+        assert_eq!(full["Heartbeats"], filtered["Heartbeats"]);
+        for node in flatten_steps(filtered["Steps"].as_array().unwrap()) {
+            assert!(node["Heartbeats"].as_u64().unwrap() >= 1000);
+        }
+    }
+    let empty = record_steps(&root, "18446744073709551615");
+    assert!(commands(&empty).iter().all(|row| row["Steps"] == json!([])));
+}
+
+#[test]
+fn step_listings_select_one_command_sort_limit_and_validate_input() {
+    let root = fixture("steps");
+    let profile = record_steps(&root, "0");
+    let path = root.join("profile.json");
+    std::fs::write(&path, profile.to_string()).unwrap();
+    let uri = format!("file://{}", path.display());
+    let list = |profile: &str, path: &str, key: &str, format: &str| {
+        cli(&[
+            "profile",
+            "list-steps",
+            "--profile",
+            profile,
+            "--path",
+            path,
+            "--key",
+            key,
+            "--limit",
+            "3",
+            "--output",
+            format,
+        ])
+    };
+    let result = list(&uri, "Steps.lean", "repeated", "json");
+    assert_code(&result, 0);
+    let value: Value = serde_json::from_slice(&result.stdout).unwrap();
+    pascal_case(&value);
+    assert_eq!(value["Key"], "repeated");
+    let steps = value["Steps"].as_array().unwrap();
+    assert_eq!(steps.len(), 3);
+    assert!(
+        steps
+            .windows(2)
+            .all(|pair| pair[0]["Heartbeats"].as_u64() >= pair[1]["Heartbeats"].as_u64())
+    );
+    assert!(steps.iter().any(|step| step["Depth"].as_u64().unwrap() > 0));
+    for format in ["text", "table"] {
+        let result = list(&uri, "Steps.lean", "repeated", format);
+        assert_code(&result, 0);
+        assert!(String::from_utf8(result.stdout).unwrap().contains("Elab."));
+    }
+    assert_code(&list(&uri, "missing.lean", "repeated", "json"), 254);
+    assert_code(&list(&uri, "Steps.lean", "missing", "json"), 254);
+    let none = record(&root, 0);
+    assert_code(
+        &list(&none.to_string(), "Steps.lean", "repeated", "json"),
+        254,
+    );
+    let mut invalid = profile.clone();
+    invalid["Files"][0]["Commands"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("Steps");
+    std::fs::write(&path, invalid.to_string()).unwrap();
+    assert_code(&list(&uri, "Steps.lean", "repeated", "json"), 254);
+    assert_code(&compare(&invalid, &invalid, &[]), 254);
+    let mut heavier = profile.clone();
+    let row = heavier["Files"][0]["Commands"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|row| row["Key"] == "repeated")
+        .unwrap();
+    row["Heartbeats"] = json!(row["Heartbeats"].as_u64().unwrap() * 3);
+    row["Steps"] = json!([]);
+    let result = comparison(&profile, &heavier, &[], 254);
+    assert_eq!(result["Summary"]["Regressed"], 1);
+    assert_eq!(result["Commands"][0]["Key"], "repeated");
+}
+
+#[test]
+fn deep_steps_can_be_read_listed_compared_and_serialized() {
+    let mut profile = synthetic_profile(&[("Deep.lean", "deep", 10000)]);
+    profile["Conditions"]["Detail"] = json!("steps");
+    profile["Files"][0]["Commands"][0]["Steps"] = json!("TREE");
+    let mut tree =
+        String::from("{\"Class\":\"leaf\",\"Heartbeats\":9999,\"Range\":null,\"Children\":[]}");
+    for _ in 0..200 {
+        tree = format!(
+            "{{\"Class\":\"parent\",\"Heartbeats\":1,\"Range\":null,\"Children\":[{tree}]}}"
+        );
+    }
+    let root = fixture("steps");
+    let path = root.join("deep.json");
+    std::fs::write(
+        &path,
+        profile
+            .to_string()
+            .replace("\"TREE\"", &format!("[{tree}]")),
+    )
+    .unwrap();
+    let uri = format!("file://{}", path.display());
+    let listed = cli(&[
+        "profile",
+        "list-steps",
+        "--profile",
+        &uri,
+        "--path",
+        "Deep.lean",
+        "--key",
+        "deep",
+        "--limit",
+        "1",
+    ]);
+    assert_code(&listed, 0);
+    let listed: Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(listed["Steps"][0]["Depth"], 200);
+    assert_eq!(listed["Steps"][0]["Class"], "leaf");
+    let compared = cli(&[
+        "profile",
+        "compare-profiles",
+        "--base-profile",
+        &uri,
+        "--head-profile",
+        &uri,
+    ]);
+    assert_code(&compared, 0);
+    assert_eq!(
+        serde_json::from_slice::<Value>(&compared.stdout).unwrap()["Summary"]["Unchanged"],
+        1
+    );
+    let commands = cli(&["profile", "list-commands", "--profile", &uri]);
+    assert_code(&commands, 0);
+    assert!(
+        String::from_utf8(commands.stdout)
+            .unwrap()
+            .contains("\"Class\": \"leaf\"")
+    );
+    let mut input = std::fs::read_to_string(&path).unwrap();
+    input.push_str(" {}");
+    std::fs::write(&path, input).unwrap();
+    assert_code(&cli(&["profile", "list-files", "--profile", &uri]), 252);
 }

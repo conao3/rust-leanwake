@@ -17,7 +17,9 @@ the entire process tree to four cores. Use `cargo -j 4` for Rust builds.
 - `src/project.rs`: Lake discovery, setup, selection and bounded file workers.
 - `src/process.rs`: child pipes, cleanup and Linux parent-death signals.
 - `src/model.rs`: the PascalCase schema, version 1.
-- `src/main.rs`: exit codes, listing and output formats.
+- `src/json_io.rs`: stack-growing JSON decoding and serialization for deep traces.
+- `src/main.rs`: exit codes, command and file listings, and output formats.
+- `src/steps.rs`: command selection, trace flattening, sorting and step output.
 - `src/compare.rs`: profile validation, metadata lookup, sorting and output.
 - `src/rules.rs`: embedded Lean comparison definitions and proofs.
 - `lean/` and `.leanfran/cache/`: extracted Lean and generated Rust, committed together.
@@ -83,12 +85,25 @@ Parse each command before measuring `elabCommandAtFrontend`. Read the raw
 thread heartbeat counter and monotonic nanosecond clock immediately around
 elaboration. Name collection, sorting, hashing, diagnostics and serialization
 are outside the measurement interval. Preserve all project limits and options
-except `Elab.async`, which is forced to false.
+except `Elab.async`, which is forced to false. In steps mode, also force heartbeat
+profiling with a zero capture threshold and retained trace state. Apply the
+requested step threshold only when exporting the tree, outside measurement.
+Keep nodes with at least that many heartbeats, promoting retained children of
+omitted nodes. This keeps command and trace measurements independent of the
+output threshold.
 
 Install a wrapper around the imported `set_option` command elaborator. It
-restores `Elab.async=false` after the original handler, including handlers
+restores the measurement options after the original handler, including handlers
 reached through `set_option ... in` macro expansion. Also force scopes to false
-before each top-level command. Collect snapshot diagnostics after measurement:
+before each top-level command. In steps mode, wrap tactic elaborator entries
+with `Leanwake.tactic` trace nodes carrying originating syntax and the syntax
+kind. A scoped extension tracks wrapped entries so newly registered tactics are
+wrapped once and section boundaries restore both registries. Unknown trace
+positions stay null; child nodes never inherit a parent's position. Read and
+write trace trees through `json_io` and drain nested children iteratively on
+drop; real profiles exceed serde_json's default nesting limit.
+
+Collect snapshot diagnostics and trace trees after measurement:
 Lean also uses completed snapshots for synchronous lazy realization. The
 fixtures exercise both source forms and check that substantial proof work is
 counted.
@@ -181,8 +196,21 @@ network-isolated Nix build. A missing cache is an error.
 Comparison validation checks `SchemaVersion`, `Toolchain` and `Conditions` before
 classification and prints both values for every differing field. Reject errored
 files, errored commands and duplicate pairs on either side. The supported profile
-schema and conditions remain version 1, synchronous elaboration and detail none.
+schema and conditions are version 1, synchronous elaboration, and detail `none`
+or `steps`. Every command in a steps profile must have `Steps`; commands in a
+none profile must omit it. Comparing different details fails before classification.
 Missing sides of added or removed commands are JSON null; their delta uses zero
 for that side. Ranges come from head when present and from base for removals.
 Omit unchanged rows and order regressions first by descending delta, then use
 status, descending delta, path and key for deterministic output.
+
+
+## Step acceptance tests
+
+The steps fixture contains identical `simp` tactics on separate lines, a locally
+registered tactic, nested and persistent profiler option overrides, instance
+resolution and conditional simplification. Check exact ranges, positive counts,
+complete repeated trace equality, threshold-independent command counts, omitted
+`Steps` for detail none, and comparison using command counts for detail steps.
+`list-steps` must reject unavailable commands, detail none and inconsistent
+records, and report descending counts with tree depths in every output format.

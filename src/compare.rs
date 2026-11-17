@@ -9,16 +9,15 @@ use std::io::Write;
 
 type Ranges = BTreeMap<(String, String), Range>;
 
-fn read(input: &str, parameter: &str) -> Result<Value> {
-    serde_json::from_str(input).map_err(|e| Error::parameter(format!("{parameter}: {e}")))
+fn read(input: &str, parameter: &str) -> Result<Profile> {
+    crate::json_io::read(input.as_bytes())
+        .map_err(|e| Error::parameter(format!("{parameter}: {e}")))
 }
 
-fn validate(value: Value, side: &str) -> Result<(Vec<Entry>, Ranges)> {
-    let profile: Profile =
-        serde_json::from_value(value).map_err(|e| Error::parameter(format!("{side}: {e}")))?;
+fn validate(profile: Profile, side: &str) -> Result<(Vec<Entry>, Ranges)> {
     if profile.schema_version != 1
         || profile.conditions.r#async
-        || profile.conditions.detail != "none"
+        || !matches!(profile.conditions.detail.as_str(), "none" | "steps")
     {
         return Err(Error::target(format!(
             "{side}: unsupported SchemaVersion={} or Conditions={}",
@@ -26,6 +25,7 @@ fn validate(value: Value, side: &str) -> Result<(Vec<Entry>, Ranges)> {
             serde_json::to_string(&profile.conditions)?
         )));
     }
+    profile.validate_steps()?;
     let mut entries = Vec::new();
     let mut ranges = BTreeMap::new();
     for file in profile.files {
@@ -98,10 +98,23 @@ struct DisplayRow {
 pub fn run(options: Compare, output: Output) -> Result<u8> {
     let base = read(&options.base_profile, "--base-profile")?;
     let head = read(&options.head_profile, "--head-profile")?;
+    let metadata = |profile: &Profile| {
+        json!({
+            "SchemaVersion": profile.schema_version, "Toolchain": profile.toolchain,
+            "Conditions": profile.conditions,
+        })
+    };
+    let base_metadata = metadata(&base);
+    let head_metadata = metadata(&head);
     let differences: Vec<_> = ["SchemaVersion", "Toolchain", "Conditions"]
         .into_iter()
-        .filter(|field| base[*field] != head[*field])
-        .map(|field| format!("{field}: base={}, head={}", base[field], head[field]))
+        .filter(|field| base_metadata[*field] != head_metadata[*field])
+        .map(|field| {
+            format!(
+                "{field}: base={}, head={}",
+                base_metadata[field], head_metadata[field]
+            )
+        })
         .collect();
     if !differences.is_empty() {
         return Err(Error::target(format!(

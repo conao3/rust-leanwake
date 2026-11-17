@@ -1,10 +1,12 @@
 mod cli;
 mod compare;
 mod error;
+mod json_io;
 mod model;
 mod process;
 mod project;
 mod rules;
+mod steps;
 
 use clap::{CommandFactory, Parser};
 use cli::{Cli, Command, Output, ProfileCommand};
@@ -15,15 +17,16 @@ use std::io::Write;
 
 fn load_profile(input: &str) -> Result<Profile> {
     let profile: Profile =
-        serde_json::from_str(input).map_err(|e| Error::parameter(format!("--profile: {e}")))?;
+        json_io::read(input.as_bytes()).map_err(|e| Error::parameter(format!("--profile: {e}")))?;
     if profile.schema_version != 1
         || profile.conditions.r#async
-        || profile.conditions.detail != "none"
+        || !matches!(profile.conditions.detail.as_str(), "none" | "steps")
     {
         return Err(Error::target(
             "unsupported profile schema or measurement conditions",
         ));
     }
+    profile.validate_steps()?;
     Ok(profile)
 }
 
@@ -87,16 +90,25 @@ fn run(cli: Cli) -> Result<u8> {
     process::DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
     let Command::Profile { command } = cli.command;
     match command {
+        ProfileCommand::ListSteps {
+            profile,
+            path,
+            key,
+            limit,
+        } => steps::run(&load_profile(&profile)?, &path, &key, limit, cli.output),
         ProfileCommand::CompareProfiles(options) => compare::run(options, cli.output),
         ProfileCommand::RecordProfile(options) => {
             let profile = project::record(&options)?;
             let failed = profile.files.iter().any(|file| file.has_errors);
-            let value = serde_json::to_value(&profile)?;
             if let Some(path) = &options.output_file {
-                let mut file = std::fs::File::create(path)?;
-                writeln!(file, "{}", serde_json::to_string_pretty(&value)?)?;
+                json_io::write(
+                    &profile,
+                    std::io::BufWriter::new(std::fs::File::create(path)?),
+                )?;
+            } else if matches!(cli.output, Output::Json) {
+                json_io::write(&profile, std::io::stdout().lock())?;
             } else {
-                emit(&value, &file_rows(&profile)?, cli.output)?;
+                emit(&json!({}), &file_rows(&profile)?, cli.output)?;
             }
             Ok(if failed { 254 } else { 0 })
         }
@@ -121,13 +133,39 @@ fn run(cli: Cli) -> Result<u8> {
             if let Some(limit) = limit {
                 commands.truncate(limit);
             }
+            if matches!(cli.output, Output::Json) {
+                #[derive(serde::Serialize)]
+                #[serde(rename_all = "PascalCase")]
+                struct Row<'a> {
+                    path: &'a str,
+                    module: &'a str,
+                    #[serde(flatten)]
+                    command: &'a model::Command,
+                }
+                #[derive(serde::Serialize)]
+                #[serde(rename_all = "PascalCase")]
+                struct Listing<'a> {
+                    commands: Vec<Row<'a>>,
+                }
+                let listing = Listing {
+                    commands: commands
+                        .iter()
+                        .map(|(file, command)| Row {
+                            path: &file.path,
+                            module: &file.module,
+                            command,
+                        })
+                        .collect(),
+                };
+                json_io::write(&listing, std::io::stdout().lock())?;
+                return Ok(0);
+            }
             let rows: Vec<_> = commands
                 .into_iter()
                 .map(|(file, command)| {
-                    let mut row = serde_json::to_value(command).expect("command serialization");
-                    row["Path"] = json!(file.path);
-                    row["Module"] = json!(file.module);
-                    row
+                    json!({"Path": file.path, "Key": command.key,
+                        "Heartbeats": command.heartbeats, "ElapsedNs": command.elapsed_ns,
+                        "HasErrors": command.has_errors})
                 })
                 .collect();
             emit(&json!({"Commands": rows}), &rows, cli.output)?;
