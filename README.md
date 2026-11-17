@@ -186,7 +186,7 @@ Repeated recordings of unchanged real projects on four cores produced:
 | lean-assay / default | 8 | 133 | 0 | 14.1–17.7 s | 23.0 s |
 | lean-assay / all | 30 | 253 | 137 | 199.4–248.2 s | 147.5 s |
 
-All files had `HasErrors=false`. Small remaining differences are preserved, rather than rounded away. The deterministic integration fixture matches exactly; this is not a guarantee for arbitrary Lean metaprograms. Lean's lazy realization and kernel replay use additional internal mechanisms beyond the top-level async switch, and the precise source of the remaining variation is not isolated. The default absolute threshold of 1,000 exceeds the largest observed difference of 137, while the relative threshold also requires a change above 1%.
+All files had `HasErrors=false`. Small remaining differences are preserved, rather than rounded away. The deterministic integration fixture matches exactly; this is not a guarantee for arbitrary Lean metaprograms. Lean's lazy realization and kernel replay use additional internal mechanisms beyond the top-level async switch, and the precise source of the remaining variation is not isolated. Another pair of lean-assay / all recordings differed by at most 183. The default absolute threshold of 1,000 exceeds every observed difference, while the relative threshold also requires a change above 1%.
 
 ## Verified rules
 
