@@ -63,7 +63,9 @@ lake -J query +Sample.Basic:setup
 ```
 
 The host expands `:defaultModules` with `:transImports`, queries each `:lean`
-path, and keeps source files in the project outside hidden directories. This
+path, and checks every lexical path component before canonicalization. Keep
+source files in the project outside hidden paths and symbolic links, including
+symbolic link ancestors, using the same selection function as explicit paths. This
 handles executable roots, library globs and source directories through Lake.
 `:setup` builds imports, plugins and other module dependencies before returning
 `ModuleSetup`. Preparation is serial to avoid concurrent Lake writers. Adapter

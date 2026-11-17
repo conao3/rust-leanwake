@@ -1430,3 +1430,34 @@ def x : Nat := 1
         }
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn default_selection_excludes_symlink_files_and_ancestors() {
+    for ancestor in [false, true] {
+        let root = fixture("async");
+        std::fs::write(root.join("Probe.lean"), "private def hidden : Nat := 1\n").unwrap();
+        if ancestor {
+            std::fs::create_dir(root.join("real")).unwrap();
+            std::fs::rename(root.join("Probe.lean"), root.join("real/Probe.lean")).unwrap();
+            std::os::unix::fs::symlink("real", root.join("linked")).unwrap();
+            let config = root.join("lakefile.toml");
+            let text = std::fs::read_to_string(&config)
+                .unwrap()
+                .replace("name = \"async\"", "name = \"async\"\nsrcDir = \"linked\"");
+            std::fs::write(config, text).unwrap();
+        } else {
+            std::fs::rename(root.join("Probe.lean"), root.join("Real.lean")).unwrap();
+            std::os::unix::fs::symlink("Real.lean", root.join("Probe.lean")).unwrap();
+        }
+        assert_code(&lake_build(&root), 0);
+        let output = cli(&[
+            "profile",
+            "record-profile",
+            "--project-dir",
+            root.to_str().unwrap(),
+        ]);
+        assert_code(&output, 252);
+        assert!(String::from_utf8_lossy(&output.stderr).contains("no Lean source files selected"));
+    }
+}

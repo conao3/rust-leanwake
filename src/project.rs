@@ -129,15 +129,9 @@ fn prepare(
             let targets: Vec<_> = modules.iter().map(|name| format!("+{name}:lean")).collect();
             for value in query(root, &targets)? {
                 let path: PathBuf = serde_json::from_value(value)?;
-                let path = path.canonicalize()?;
-                let Ok(relative) = path.strip_prefix(root) else {
-                    continue;
-                };
-                if !relative
-                    .components()
-                    .any(|part| part.as_os_str().to_string_lossy().starts_with('.'))
-                {
-                    files.insert(path);
+                let path = root.join(path);
+                if path.starts_with(root) {
+                    visit(root, &path, &mut files)?;
                 }
             }
         }
