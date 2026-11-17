@@ -12,12 +12,12 @@ structure Box where
 instance : Inhabited Box := ⟨⟨0⟩⟩
 
 mutual
-  def even : Nat → Bool
+  def zEven : Nat → Bool
     | 0 => true
-    | n + 1 => odd n
-  def odd : Nat → Bool
+    | n + 1 => aOdd n
+  def aOdd : Nat → Bool
     | 0 => false
-    | n + 1 => even n
+    | n + 1 => zEven n
 end
 
 example : answer = 42 := rfl
@@ -32,3 +32,7 @@ open Nat
 #eval IO.println "fixture output"
 
 end Sample
+
+#exit
+
+def skippedAfterExit : Nat := unknownIdentifier

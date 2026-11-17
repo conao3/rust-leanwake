@@ -19,20 +19,25 @@
       perSystem =
         { pkgs, ... }:
         let
+          lean =
+            assert pkgs.lib.assertMsg (
+              pkgs.lean4.version == "4.35.0"
+            ) "Leanwake requires nixpkgs Lean 4.35.0; update the lock file deliberately";
+            pkgs.lean4;
           adapter = pkgs.stdenv.mkDerivation {
             pname = "leanwake-adapter";
             version = "0.1.0";
             src = ./native;
             nativeBuildInputs = [
-              pkgs.lean4
+              lean
               pkgs.makeWrapper
             ];
             buildPhase = "lake build";
             installPhase = ''
               install -Dm755 .lake/build/bin/leanwake-adapter $out/bin/leanwake-adapter
               install -Dm755 .lake/build/bin/leanwake-project $out/bin/leanwake-project
-              wrapProgram $out/bin/leanwake-project --set LEAN_SYSROOT ${pkgs.lean4}
-              wrapProgram $out/bin/leanwake-adapter --set LEAN_SYSROOT ${pkgs.lean4}
+              wrapProgram $out/bin/leanwake-project --set LEAN_SYSROOT ${lean}
+              wrapProgram $out/bin/leanwake-adapter --set LEAN_SYSROOT ${lean}
             '';
           };
         in
@@ -44,14 +49,12 @@
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.makeWrapper ];
-            nativeCheckInputs = [ pkgs.lean4 ];
+            nativeCheckInputs = [ lean ];
             LEANWAKE_ADAPTER = "${adapter}/bin/leanwake-adapter";
             checkPhase = "cargo test -j 4 -- --test-threads=1";
-            LEAN_SYSROOT = "${pkgs.lean4}";
+            LEAN_SYSROOT = "${lean}";
             postInstall = ''
-              wrapProgram $out/bin/leanwake --set LEANWAKE_ADAPTER ${adapter}/bin/leanwake-adapter --set LEAN_SYSROOT ${pkgs.lean4} --prefix PATH : ${
-                pkgs.lib.makeBinPath [ pkgs.lean4 ]
-              }
+              wrapProgram $out/bin/leanwake --set LEANWAKE_ADAPTER ${adapter}/bin/leanwake-adapter --set LEAN_SYSROOT ${lean} --prefix PATH : ${pkgs.lib.makeBinPath [ lean ]}
             '';
             meta = {
               mainProgram = "leanwake";
@@ -65,12 +68,12 @@
               pkgs.rustfmt
               pkgs.clippy
               pkgs.rust-analyzer
-              pkgs.lean4
+              lean
               pkgs.gnumake
               pkgs.python3
               pkgs.ruff
             ];
-            LEAN_SYSROOT = "${pkgs.lean4}";
+            LEAN_SYSROOT = "${lean}";
             shellHook = ''export LEANWAKE_ADAPTER="$PWD/native/.lake/build/bin/leanwake-adapter"'';
           };
           treefmt.programs.nixfmt.enable = true;

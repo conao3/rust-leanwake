@@ -52,6 +52,35 @@ fn query(root: &Path, targets: &[String]) -> Result<Vec<Value>> {
 }
 
 fn visit(root: &Path, path: &Path, files: &mut BTreeSet<PathBuf>) -> Result<()> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| Error::parameter("--paths must stay inside --project-dir"))?;
+    let mut cursor = root.to_path_buf();
+    for part in relative.components() {
+        match part {
+            std::path::Component::Normal(name) => {
+                if name.to_string_lossy().starts_with('.') {
+                    return Ok(());
+                }
+                cursor.push(name);
+            }
+            std::path::Component::ParentDir => {
+                if cursor == root {
+                    return Err(Error::parameter("--paths must stay inside --project-dir"));
+                }
+                cursor.pop();
+            }
+            std::path::Component::CurDir => continue,
+            _ => return Err(Error::parameter("invalid source path")),
+        }
+        if std::fs::symlink_metadata(&cursor)
+            .map_err(|e| Error::parameter(format!("{}: {e}", cursor.display())))?
+            .file_type()
+            .is_symlink()
+        {
+            return Ok(());
+        }
+    }
     let meta = std::fs::symlink_metadata(path)
         .map_err(|e| Error::parameter(format!("{}: {e}", path.display())))?;
     if meta.file_type().is_symlink() {

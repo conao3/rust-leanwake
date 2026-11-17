@@ -178,7 +178,7 @@ fn records_are_deterministic_and_preserve_lake_configuration() {
         "Sample.answer_eq",
         "Sample.Box",
         "Sample.instInhabitedBox",
-        "Sample.even",
+        "Sample.zEven",
         "Sample.café",
         "Sample.heavy",
         "Sample.nested",
@@ -199,6 +199,22 @@ fn records_are_deterministic_and_preserve_lake_configuration() {
             "proof work missing: {row}"
         );
     }
+    let mutual = rows
+        .iter()
+        .find(|row| row["Kind"] == "Lean.Parser.Command.mutual")
+        .unwrap();
+    assert_eq!(mutual["Names"], json!(["Sample.zEven", "Sample.aOdd"]));
+    assert_eq!(mutual["Key"], "Sample.zEven");
+    let structure = rows.iter().find(|row| row["Key"] == "Sample.Box").unwrap();
+    assert_eq!(
+        structure["Names"],
+        json!(["Sample.Box", "Sample.Box.mk", "Sample.Box.value"])
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row["Kind"] == "Lean.Parser.Command.exit")
+    );
+    assert!(!rows.iter().any(|row| row["Key"] == "skippedAfterExit"));
     let examples: Vec<_> = rows
         .iter()
         .filter(|row| {
@@ -273,7 +289,7 @@ fn errors_are_recorded_without_stopping_other_files() {
     let root = fixture("errors");
     assert!(!lake_build(&root).status.success());
     let profile = record(&root, 254);
-    assert_eq!(profile["Files"].as_array().unwrap().len(), 3);
+    assert_eq!(profile["Files"].as_array().unwrap().len(), 5);
     assert_eq!(
         profile["Files"]
             .as_array()
@@ -281,8 +297,18 @@ fn errors_are_recorded_without_stopping_other_files() {
             .iter()
             .filter(|file| file["HasErrors"] == true)
             .count(),
-        2
+        4
     );
+    for path in ["Errors/Dependent.lean", "Errors/Missing.lean"] {
+        let file = profile["Files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["Path"] == path)
+            .unwrap();
+        assert_eq!(file["HasErrors"], true);
+        assert_eq!(file["Commands"], json!([]));
+    }
     assert!(
         commands(&profile)
             .iter()
@@ -414,6 +440,31 @@ fn explicit_paths_skip_hidden_files_and_symlinks_and_support_external_modules() 
         "--project-dir",
         root.to_str().unwrap(),
         "--paths",
+        "scratch/.Hidden.lean",
+        "scratch/One.lean",
+    ]);
+    assert_code(&out, 0);
+    let profile: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(profile["Files"].as_array().unwrap().len(), 1);
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&dir, root.join("linked")).unwrap();
+        let out = cli(&[
+            "profile",
+            "record-profile",
+            "--project-dir",
+            root.to_str().unwrap(),
+            "--paths",
+            "linked/One.lean",
+        ]);
+        assert_code(&out, 252);
+    }
+    let out = cli(&[
+        "profile",
+        "record-profile",
+        "--project-dir",
+        root.to_str().unwrap(),
+        "--paths",
         "../..",
     ]);
     assert_code(&out, 252);
@@ -464,4 +515,77 @@ fn module_realization_snapshots_preserve_success_and_heartbeats() {
             .collect::<Vec<_>>()
     };
     assert_eq!(signature(&first), signature(&second));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn child_process_dies_when_host_is_killed() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let root = fixture("good");
+    let bin = root.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let shell = Command::new("sh")
+        .args(["-c", "command -v sh"])
+        .output()
+        .unwrap();
+    assert_code(&shell, 0);
+    let shell = String::from_utf8(shell.stdout).unwrap();
+    let fake_lean = bin.join("lean");
+    std::fs::write(
+        &fake_lean,
+        format!(
+            "#!{}\necho $$ > \"$LEANWAKE_TEST_PID\"\nexec sleep 60\n",
+            shell.trim()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake_lean, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let pid_file = root.join("child.pid");
+    let mut paths = vec![bin];
+    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap()));
+    let mut host = Command::new(env!("CARGO_BIN_EXE_leanwake"))
+        .args(["profile", "record-profile", "--project-dir"])
+        .arg(&root)
+        .env("PATH", std::env::join_paths(paths).unwrap())
+        .env("LEANWAKE_TEST_PID", &pid_file)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let pid = loop {
+        if let Ok(text) = std::fs::read_to_string(&pid_file)
+            && let Ok(pid) = text.trim().parse::<i32>()
+        {
+            break Some(pid);
+        }
+        if Instant::now() >= deadline {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    host.kill().unwrap();
+    host.wait().unwrap();
+    let pid = pid.expect("host did not start the child");
+    let running = || {
+        std::fs::read_to_string(format!("/proc/{pid}/stat"))
+            .ok()
+            .and_then(|stat| {
+                stat.rsplit_once(") ")
+                    .map(|(_, tail)| !tail.starts_with('Z'))
+            })
+            .unwrap_or(false)
+    };
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while running() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let leaked = running();
+    if leaked {
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+    assert!(!leaked, "child {pid} survived the host's SIGKILL");
 }

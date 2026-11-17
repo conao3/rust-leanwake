@@ -14,7 +14,8 @@ result/bin/leanwake profile list-files --profile file://profile.json --output ta
 
 The default selection follows Lake's default targets and their transitive local
 imports. Use `--paths File.lean Directory` to select source files relative to the
-project root. Directory traversal skips hidden entries and symbolic links.
+project root. Selection skips hidden entries and symbolic links, including
+explicit paths through hidden or linked directories.
 An explicit source outside a declared Lake target uses the package's Lean
 options. The project must declare `leanprover/lean4:v4.35.0` in `lean-toolchain`.
 
@@ -34,6 +35,8 @@ uses thousands of these units; Leanwake preserves the project's limit. Command
 time excludes parsing, imports, name collection and JSON serialization. Import
 time is recorded separately. Elaboration can execute the project's metaprograms
 and `#eval` actions, just as compiling its source can.
+Synchronous elaboration does not guarantee identical raw counters for every
+Lean workload; small differences remain in the real-project measurements.
 
 ## Development
 

@@ -65,7 +65,7 @@ def measureCommands (path input : String) : FrontendM (Array Json × Bool) := do
     let hasErrors := diagnostics.hasErrors
     failed := failed || hasErrors
     for message in diagnostics.toList do IO.eprintln (← message.toString)
-    if Parser.isTerminalCommand cmd then break
+    if cmd.isOfKind ``Parser.Command.eoi then break
     let some start := cmd.getPos? | throw <| IO.userError "command has no start position"
     let some stop := cmd.getTailPos? | throw <| IO.userError "command has no end position"
     let source := String.Pos.Raw.extract input start stop
@@ -81,6 +81,7 @@ def measureCommands (path input : String) : FrontendM (Array Json × Bool) := do
         ("End", positionJson (ictx.fileMap.toPosition stop))]),
       ("Heartbeats", toJson (h1 - h0)), ("ElapsedNs", toJson (t1 - t0)),
       ("HasErrors", toJson hasErrors)]
+    if Parser.isTerminalCommand cmd then break
   return (rows, failed)
 
 def setConfigOption (opts : Options) (arg : String) : IO Options := do
@@ -94,7 +95,8 @@ def setConfigOption (opts : Options) (arg : String) : IO Options := do
     pure (opts.set name value)
 
 unsafe def profile (req : Request) : IO Json := do
-  initSearchPath (← findSysroot)
+  let some sysroot ← IO.getEnv "LEAN_SYSROOT" | throw <| IO.userError "LEAN_SYSROOT is required"
+  initSearchPath sysroot
   enableInitializersExecution
   let input ← IO.FS.readFile req.path
   let ictx := Parser.mkInputContext input req.path

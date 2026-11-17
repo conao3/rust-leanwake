@@ -83,13 +83,16 @@ restores `Elab.async=false` after the original handler, including handlers
 reached through `set_option ... in` macro expansion. Also force scopes to false
 before each top-level command. Collect snapshot diagnostics after measurement:
 Lean also uses completed snapshots for synchronous lazy realization. The
-fixtures exercise both source forms and check that substantial proof work is counted.
+fixtures exercise both source forms and check that substantial proof work is
+counted.
 
 Keep parser diagnostics separately: Lean's top-level elaborator resets its
 message log. A file with parser, import or elaboration errors has `HasErrors`.
 Report each command's own errors without carrying an earlier command's errors
 into subsequent commands. Redirect elaborator standard output to standard
 error so that `#eval IO.println` preserves the JSON protocol.
+Record an explicit `#exit` before stopping; omit only the synthetic end-of-input
+command.
 
 Collect new constants with declaration-range metadata. Sort by declaration
 range start and then lexicographically by name. The first name is `Key`. For
@@ -99,6 +102,25 @@ one-based occurrence number for that exact kind and source in the file.
 
 Tests check repeatability, source hashing, duplicate examples, names, module
 paths, plugins, configuration mutations, heartbeat limits, syntax errors,
-continued recording, all help levels, exit codes, PascalCase and file/stdin
-inputs. Unsupported toolchains and unsupported compiler arguments fail rather
+continued recording after failed imports, explicit hidden paths and symlink
+ancestors, all help levels, exit codes, PascalCase and file/stdin inputs.
+The Linux process test kills the host and checks that its child also dies.
+Unsupported toolchains and unsupported compiler arguments fail rather
 than silently changing the execution conditions.
+
+## Repeatability evidence
+
+On 2026-11-17, two recordings with `--jobs 4` on four Linux CPU cores measured
+61 files and 967 commands in lean-ritsuryo, and 30 files and 253 commands in
+lean-assay. Both full selections and their corresponding Lake builds succeeded
+without error files. Heartbeats differed in 22 ritsuryo commands (maximum 15)
+and 16 assay commands (maximum 137). Assay's default selection of 8 files and
+133 commands matched exactly, as did the deterministic integration fixtures.
+
+Keep raw counters; do not round these differences away. Lean 4.35.0's
+`Environment.realizeValue` explicitly resets heartbeats around nondeterministic
+realization work, and `realizeConst` schedules kernel replay tasks independently
+of the top-level elaboration option. The precise source of the remaining small
+differences has not been isolated. Use the measured variation when choosing
+comparison thresholds in stage 2. One task worker alone did not eliminate the
+variation in a repeated single-file experiment.
