@@ -493,6 +493,19 @@ fn stdin_profiles_and_file_parameters_work() {
         serde_json::from_slice::<Value>(&out.stdout).unwrap(),
         json!({"Files": []})
     );
+    let out = cli(&[
+        "profile",
+        "list-commands",
+        "--profile",
+        &input.to_string(),
+        "--output",
+        "table",
+    ]);
+    assert_code(&out, 0);
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        "Heartbeats\tElapsedNs\tPath\tKey\tHasErrors\n"
+    );
 }
 
 #[test]

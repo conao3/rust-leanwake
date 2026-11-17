@@ -50,7 +50,7 @@ fn emit(value: &Value, rows: &[Value], output: Output) -> Result<()> {
     match output {
         Output::Json => writeln!(stdout, "{}", serde_json::to_string_pretty(value)?)?,
         Output::Text | Output::Table => {
-            let command_rows = rows.first().is_some_and(|row| row.get("Key").is_some());
+            let command_rows = value.get("Commands").is_some();
             let fields: &[&str] = if command_rows {
                 &["Heartbeats", "ElapsedNs", "Path", "Key", "HasErrors"]
             } else {
