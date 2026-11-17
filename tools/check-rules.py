@@ -85,17 +85,26 @@ def main():
                 name,
                 axioms,
             )
-        mutant = directory / "Mutant.lean"
-        mutant.write_text(expected.replace("else .unchanged", "else .regressed", 1))
-        rejected = subprocess.run(
-            ["lean", str(mutant)], check=False, text=True, capture_output=True
-        )
-        assert rejected.returncode != 0, (
-            "incorrect equality classification was accepted"
-        )
-        assert "error:" in rejected.stdout, rejected.stdout
+        mutations = {
+            "classification": expected.replace("else .unchanged", "else .regressed", 1),
+            "file conservation": expected.replace(
+                "files.flatMap (fun (bs, hs) => matchEntries bs hs a r)",
+                "files.tail.flatMap (fun (bs, hs) => matchEntries bs hs a r)",
+                1,
+            ),
+        }
+        for name, source in mutations.items():
+            assert source != expected, f"mutation did not change {name}"
+            mutant = directory / "Mutant.lean"
+            mutant.write_text(source)
+            rejected = subprocess.run(
+                ["lean", str(mutant)], check=False, text=True, capture_output=True
+            )
+            assert rejected.returncode != 0, f"incorrect {name} was accepted"
+            assert "error:" in rejected.stdout, rejected.stdout
         print(
-            f"Checked {len(theorems)} theorems, generated Rust, and rejected a classification mutation"
+            f"Checked {len(theorems)} theorems, generated Rust, "
+            "and rejected classification and file-conservation mutations"
         )
 
 

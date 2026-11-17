@@ -124,9 +124,15 @@ pub fn run(options: Compare, output: Output) -> Result<u8> {
     }
     let (base, base_ranges) = validate(base, "base")?;
     let (head, head_ranges) = validate(head, "head")?;
-    let rows = core::match_entries(
-        base,
-        head,
+    let mut files: BTreeMap<String, (Vec<Entry>, Vec<Entry>)> = BTreeMap::new();
+    for entry in base {
+        files.entry(entry.path.clone()).or_default().0.push(entry);
+    }
+    for entry in head {
+        files.entry(entry.path.clone()).or_default().1.push(entry);
+    }
+    let rows = core::match_files(
+        files.into_values().collect(),
         options.absolute_threshold_heartbeats.into(),
         options.relative_threshold_percent.into(),
     );

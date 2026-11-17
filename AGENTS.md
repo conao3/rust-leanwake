@@ -28,7 +28,7 @@ for Cargo and GitHub Actions.
 - `src/json_io.rs`: stack-growing JSON decoding and serialization for deep traces.
 - `src/main.rs`: exit codes, command and file listings, and output formats.
 - `src/steps.rs`: command selection, trace flattening, sorting and step output.
-- `src/compare.rs`: profile validation, metadata lookup, sorting and output.
+- `src/compare.rs`: profile validation, grouping by path, metadata lookup, sorting and output.
 - `src/rules.rs`: embedded Lean comparison definitions and proofs.
 - `lean/` and `.leanfran/cache/`: extracted Lean and generated Rust, committed together.
 - `tools/check-rules.py`: source agreement, regeneration, axiom audit and proof mutation.
@@ -40,7 +40,7 @@ for Cargo and GitHub Actions.
 The Rust host owns I/O and orchestration. Native Lean owns compiler state and
 measurement. The embedded Lean core owns classification, matching by `(Path, Key)`,
 summary counts and heartbeat totals, and regression failure. Rust calls the generated
-`match_entries`, `summarize` and `failed` functions in the comparison path.
+`match_files`, `summarize` and `failed` functions in the comparison path.
 Native runtime objects stay inside the adapter process; the boundary uses JSON.
 
 ## Lake 4.35.0 discovery
@@ -176,7 +176,12 @@ serializes totals and signed deltas as exact JSON integers.
 `takeMatch` removes the first head entry with the same path and key. `matchEntries`
 consumes the base list, classifies matched entries, marks absent entries removed,
 and marks the remaining head entries added. Duplicate input identities are rejected
-by Rust. The matcher has quadratic worst-case time in the number of commands.
+by Rust. Rust groups both inputs by path, including repeated file objects with
+different keys. `matchFiles` applies `matchEntries` to each pair of file lists.
+Matching costs the sum of the per-file squared command counts, so work scales
+with file count at a fixed number of commands per file. A single very large file
+still has quadratic cost. `summarize` folds with an accumulator to avoid stack
+growth proportional to the total number of rows.
 
 The proofs checked in `make check` include:
 
@@ -187,12 +192,18 @@ The proofs checked in `make check` include:
   cannot introduce a regression or improvement.
 - `matching_base_once`: the base projection of the result equals the input list.
 - `matching_head_once`: the head projection is a permutation of the input list.
+- `matching_files_base_once` and `matching_files_head_once`: the same occurrence
+  conservation across the grouped input lists.
+- `summary_acc_regressed`: the fold preserves the initial regression count.
 - `summary_regressed`: the regression count equals the number of regressed rows.
 - `failure_iff_regression`: failure holds exactly when a regressed row exists.
 
 The helper lemmas are checked with these theorems. The axiom audit permits only
 Lean's standard `propext`, `Classical.choice` and `Quot.sound`. A deliberately
-incorrect unchanged branch must fail proof checking on every `make check`.
+incorrect unchanged branch and dropping the first file must each fail proof
+checking on every `make check`. The 100,000-command integration test reverses
+both file and command order and checks unchanged, regressed, improved, added
+and removed counts, totals and identities without a timing assertion.
 
 Run `nix develop --command cargo build -j 4` after changing embedded Lean to extract
 and generate through `build.rs`. The dev shell sets `LEANFRAN_CLI` to the compiler

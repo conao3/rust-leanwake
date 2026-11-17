@@ -148,6 +148,25 @@ theorem matching_head_once (bs hs : List Entry) (a r : Nat) :
       | none => exact (ih rest).trans conservation
       | some h => exact ((ih rest).cons h).trans conservation
 
+def matchFiles (files : List (List Entry × List Entry)) (a r : Nat) : List Row :=
+  files.flatMap (fun (bs, hs) => matchEntries bs hs a r)
+
+theorem matching_files_base_once (files : List (List Entry × List Entry)) (a r : Nat) :
+    (matchFiles files a r).filterMap Row.base = files.flatMap Prod.fst := by
+  induction files with
+  | nil => rfl
+  | cons file files ih =>
+    simp [matchFiles, List.filterMap_append, matching_base_once] at ih ⊢
+    exact ih
+
+theorem matching_files_head_once (files : List (List Entry × List Entry)) (a r : Nat) :
+    ((matchFiles files a r).filterMap Row.head).Perm (files.flatMap Prod.snd) := by
+  induction files with
+  | nil => exact List.Perm.refl []
+  | cons file files ih =>
+    simpa only [matchFiles, List.flatMap_cons, List.filterMap_append] using
+      (matching_head_once file.1 file.2 a r).append ih
+
 structure Summary where
   regressed : Nat := 0
   improved : Nat := 0
@@ -163,10 +182,7 @@ def entryHeartbeats (e : Option Entry) : Nat :=
   | none => 0
   | some e => e.heartbeats
 
-def summarize : List Row → Summary
-  | [] => {}
-  | row :: rows =>
-    let s := summarize rows
+def addRow (s : Summary) (row : Row) : Summary :=
     { regressed := s.regressed + if row.status == .regressed then 1 else 0
       improved := s.improved + if row.status == .improved then 1 else 0
       unchanged := s.unchanged + if row.status == .unchanged then 1 else 0
@@ -175,15 +191,22 @@ def summarize : List Row → Summary
       baseHeartbeats := s.baseHeartbeats + entryHeartbeats row.base
       headHeartbeats := s.headHeartbeats + entryHeartbeats row.head }
 
+def summarize (rows : List Row) : Summary := rows.foldl addRow {}
+
 def failed (s : Summary) : Bool := 0 < s.regressed
+
+theorem summary_acc_regressed (rows : List Row) (s : Summary) :
+    (rows.foldl addRow s).regressed =
+      s.regressed + (rows.filter (·.status == .regressed)).length := by
+  induction rows generalizing s with
+  | nil => rfl
+  | cons row rows ih =>
+    simp only [List.foldl_cons, ih, addRow, List.filter_cons]
+    split <;> simp_all <;> omega
 
 theorem summary_regressed (rows : List Row) :
     (summarize rows).regressed = (rows.filter (·.status == .regressed)).length := by
-  induction rows with
-  | nil => rfl
-  | cons row rows ih =>
-    simp only [summarize, List.filter_cons]
-    split <;> simp_all <;> omega
+  simpa [summarize] using summary_acc_regressed rows {}
 
 theorem failure_iff_regression (rows : List Row) :
     failed (summarize rows) = true ↔ ∃ row ∈ rows, row.status = .regressed := by

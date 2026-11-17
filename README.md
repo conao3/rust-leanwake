@@ -86,6 +86,8 @@ Defaults are **1,000 heartbeats and 1%**. Improvement uses the same rule with ba
 
 JSON output contains `Summary`, `Thresholds` and `Commands`. Unchanged rows are omitted; regressions come first, sorted by descending heartbeat increase. Missing counts are null, with zero used for their delta. The displayed range comes from head, or base for removals. Differing schema versions, toolchains or conditions, errored profiles and duplicate `(Path, Key)` identities are rejected before comparison results are emitted. Detail steps comparisons use command totals, not sums of trace nodes.
 
+Matching groups commands by path before calling the Lean rules. Its worst-case work is the sum of each file's squared command count, rather than the square of the entire profile's count. Aggregation uses a tail-recursive fold. In a synthetic release-build benchmark with reversed file and command orders, 100 files × 500 commands took 0.37 s and 91 MiB peak RSS; 200 files × 500 commands took 0.72 s and 178 MiB. These are observations on one machine, not runtime guarantees. A single file with very many commands still has quadratic matching cost.
+
 ## Inspect steps
 
 ```sh
@@ -127,6 +129,8 @@ For all 61 files and 967 commands in lean-ritsuryo, the development host and nat
 | steps / 10,000 | 47.05 MB | 94.3 s |
 
 Every recording had zero errored files and commands. The 1,000 default reduces the unfiltered JSON size by 94.4% and keeps 6,164 distinct tactic position/kind pairs; 10,000 keeps 4,632. It also keeps both small `simp` calls in the example. These elapsed times include concurrent machine load and are observations, not performance guarantees.
+
+Two recordings at the default step threshold differed in 15 command counts, with a maximum difference of 6 raw heartbeats. Comparison classified all 967 commands as unchanged and exited successfully.
 
 ## CI for a Lean project
 
@@ -198,10 +202,11 @@ The source is [`src/rules.rs`](src/rules.rs). `leanfran` extracts it into `lean/
 | `grows_thresholds`, `regression_thresholds`, `improvement_thresholds` | Raising thresholds cannot introduce growth, regression or improvement. |
 | `takeMatch_conservation` | Taking a match preserves all head entries. |
 | `matching_base_once`, `matching_head_once` | Every input occurrence appears exactly once in the result. |
-| `summary_regressed` | The regression total equals the number of regressed rows. |
+| `matching_files_base_once`, `matching_files_head_once` | File grouping preserves every base and head occurrence exactly once. |
+| `summary_acc_regressed`, `summary_regressed` | The fold's regression total equals the initial count plus the number of regressed rows. |
 | `failure_iff_regression` | Failure holds exactly when a regression exists. |
 
-`make check` audits theorem axioms, accepting only Lean's standard `propext`, `Classical.choice` and `Quot.sound`; regenerates Rust and checks byte-for-byte agreement; and verifies that a deliberately wrong classification fails proof checking. Proofs cover the comparison definitions, while integration tests exercise file selection, native measurement and the host boundary.
+`make check` checks 18 theorems and audits their axioms, accepting only Lean's standard `propext`, `Classical.choice` and `Quot.sound`; regenerates Rust and checks byte-for-byte agreement; and verifies that deliberately wrong classification and dropped-file implementations fail proof checking. Proofs cover the comparison definitions, while integration tests exercise file selection, native measurement and the host boundary.
 
 ## Profile format
 

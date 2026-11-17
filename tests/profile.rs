@@ -657,6 +657,60 @@ fn synthetic_profile(entries: &[(&str, &str, u64)]) -> Value {
 }
 
 #[test]
+fn large_comparisons_match_by_file_and_key_without_losing_entries() {
+    let mut base = synthetic_profile(&[]);
+    base["Files"] = Value::Array(
+        (0..200)
+            .map(|file| {
+                let path = format!("File{file:03}.lean");
+                let mut profile = synthetic_profile(&[(&path, "command000", 100_000)]);
+                let mut file = profile["Files"].as_array_mut().unwrap().remove(0);
+                let template = file["Commands"][0].clone();
+                file["Commands"] = Value::Array(
+                    (0..500)
+                        .map(|command| {
+                            let mut entry = template.clone();
+                            entry["Key"] = json!(format!("command{command:03}"));
+                            entry
+                        })
+                        .collect(),
+                );
+                file
+            })
+            .collect(),
+    );
+    let mut head = base.clone();
+    head["Files"].as_array_mut().unwrap().reverse();
+    for file in head["Files"].as_array_mut().unwrap() {
+        file["Commands"].as_array_mut().unwrap().reverse();
+    }
+    head["Files"][0]["Commands"][0]["Heartbeats"] = json!(120_000);
+    head["Files"][1]["Commands"][0]["Heartbeats"] = json!(80_000);
+    head["Files"][2]["Commands"][0]["Key"] = json!("renamed");
+    let result = comparison(&base, &head, &[], 254);
+    assert_eq!(
+        result["Summary"],
+        json!({
+            "Regressed": 1, "Improved": 1, "Unchanged": 99_997,
+            "Added": 1, "Removed": 1,
+            "BaseHeartbeats": 10_000_000_000u64,
+            "HeadHeartbeats": 10_000_000_000u64,
+        })
+    );
+    let rows = result["Commands"].as_array().unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows[0]["Path"], "File199.lean");
+    assert_eq!(rows[0]["Key"], "command499");
+    assert_eq!(rows[0]["Status"], "regressed");
+    assert_eq!(rows[1]["Path"], "File198.lean");
+    assert_eq!(rows[1]["Status"], "improved");
+    assert_eq!(rows[2]["Path"], "File197.lean");
+    assert_eq!(rows[2]["Key"], "renamed");
+    assert_eq!(rows[3]["Path"], "File197.lean");
+    assert_eq!(rows[3]["Key"], "command499");
+}
+
+#[test]
 fn comparisons_classify_every_identity_and_sort_regressions() {
     let base = synthetic_profile(&[
         ("A.lean", "same", 100_000),
