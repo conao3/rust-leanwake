@@ -1,0 +1,9 @@
+name = "options"
+defaultTargets = ["Probe"]
+
+[[lean_lib]]
+name = "Config"
+
+[[lean_lib]]
+name = "Probe"
+moreLeanArgs = ["-Dweak.maxRecDepth=1234", "-Dweak.probe.enabled=true", "-Dweak.probe.count=42", "-Dweak.probe.label=hello=world", "-Dweak.unknown=true", "-Dweak.Elab.async=true"]

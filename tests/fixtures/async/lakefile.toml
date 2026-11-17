@@ -1,0 +1,5 @@
+name = "async"
+defaultTargets = ["Probe"]
+
+[[lean_lib]]
+name = "Probe"

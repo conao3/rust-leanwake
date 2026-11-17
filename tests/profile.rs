@@ -1271,3 +1271,162 @@ fn deep_steps_can_be_read_listed_compared_and_serialized() {
     std::fs::write(&path, input).unwrap();
     assert_code(&cli(&["profile", "list-files", "--profile", &uri]), 252);
 }
+
+#[test]
+fn nested_command_elaborators_preserve_synchronous_proof_costs() {
+    for detail in ["none", "steps"] {
+        let root = fixture("async");
+        assert_code(&lake_build(&root), 0);
+        let measure = || {
+            let output = cli(&[
+                "profile",
+                "record-profile",
+                "--project-dir",
+                root.to_str().unwrap(),
+                "--detail",
+                detail,
+            ]);
+            assert_code(&output, 0);
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+        };
+        let base = measure();
+        let path = root.join("Probe.lean");
+        let source = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, source.replace("500", "1500")).unwrap();
+        let head = measure();
+        let result = comparison(&base, &head, &[], 254);
+        assert_eq!(result["Summary"]["Regressed"], 1);
+        assert_eq!(result["Commands"][0]["Key"], "escaped");
+        assert!(result["Commands"][0]["BaseHeartbeats"].as_u64().unwrap() > 100_000);
+        assert_eq!(base["Conditions"]["Async"], false);
+    }
+}
+
+#[test]
+fn unfinished_elaboration_tasks_are_reported_as_errors() {
+    let root = fixture("async");
+    std::fs::write(root.join("lakefile.toml"), "name = \"pending\"\ndefaultTargets = [\"Probe\"]\n[[lean_lib]]\nname = \"Pending\"\n[[lean_lib]]\nname = \"Probe\"\n").unwrap();
+    std::fs::write(
+        root.join("Pending.lean"),
+        r#"import Lean
+initialize pendingSnapshot : IO.Ref (Option (IO.Promise Lean.Language.SnapshotTree)) ← IO.mkRef none
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("Probe.lean"),
+        r#"import Pending
+open Lean Elab Command
+run_cmd do
+  let promise ← IO.Promise.new
+  pendingSnapshot.set (some promise)
+  logSnapshotTask { stx? := none, cancelTk? := none, task := promise.result! }
+"#,
+    )
+    .unwrap();
+    for detail in ["none", "steps"] {
+        let output = cli(&[
+            "profile",
+            "record-profile",
+            "--project-dir",
+            root.to_str().unwrap(),
+            "--detail",
+            detail,
+        ]);
+        assert_code(&output, 254);
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("unfinished elaboration task"),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let profile: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let file = profile["Files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["Path"] == "Probe.lean")
+            .unwrap();
+        assert_eq!(file["HasErrors"], true);
+        assert_eq!(
+            file["Commands"].as_array().unwrap().last().unwrap()["HasErrors"],
+            true
+        );
+    }
+}
+
+#[test]
+fn imported_options_are_reparsed_like_the_lean_frontend() {
+    let root = fixture("options");
+    let config = root.join("lakefile.toml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    for strong in [false, true] {
+        let text = if strong {
+            original.replace("weak.probe.", "probe.")
+        } else {
+            original.clone()
+        };
+        std::fs::write(&config, &text).unwrap();
+        assert_code(&lake_build(&root), 0);
+        let profile = record(&root, 0);
+        let rows = commands(&profile);
+        let theorem = rows.iter().find(|row| row["Key"] == "configured").unwrap();
+        assert!(theorem["Heartbeats"].as_u64().unwrap() > 100_000);
+        for (from, to) in [
+            ("probe.enabled=true", "probe.enabled=false"),
+            ("probe.count=42", "probe.count=43"),
+            ("probe.label=hello=world", "probe.label=other"),
+        ] {
+            std::fs::write(&config, text.replace(from, to)).unwrap();
+            assert!(!lake_build(&root).status.success());
+            record(&root, 254);
+        }
+    }
+    std::fs::write(&config, original.replace("weak.unknown", "unknown")).unwrap();
+    assert!(!lake_build(&root).status.success());
+    let output = cli(&[
+        "profile",
+        "record-profile",
+        "--project-dir",
+        root.to_str().unwrap(),
+    ]);
+    assert_code(&output, 254);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown configuration option"));
+}
+
+#[test]
+fn module_linters_receive_the_parsed_commands_at_each_terminator() {
+    for terminator in ["", "#exit\n"] {
+        let root = fixture("async");
+        std::fs::write(
+            root.join("Probe.lean"),
+            format!(
+                r#"import Lean
+open Lean Elab Command
+run_cmd addModuleLinter {{ run := fun cmds => do
+  unless cmds.isEmpty do logError "module contains commands" }}
+def x : Nat := 1
+{terminator}"#
+            ),
+        )
+        .unwrap();
+        assert!(!lake_build(&root).status.success());
+        let output = cli(&[
+            "profile",
+            "record-profile",
+            "--project-dir",
+            root.to_str().unwrap(),
+        ]);
+        assert_code(&output, 254);
+        assert!(String::from_utf8_lossy(&output.stderr).contains("module contains commands"));
+        let profile: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(profile["Files"][0]["HasErrors"], true);
+        let rows = commands(&profile);
+        assert!(
+            rows.iter()
+                .any(|row| row["Key"] == "x" && row["HasErrors"] == false)
+        );
+        if !terminator.is_empty() {
+            assert_eq!(rows.last().unwrap()["HasErrors"], true);
+        }
+    }
+}

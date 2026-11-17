@@ -79,9 +79,11 @@ reads `Module.weakLeanArgs ++ Module.leanArgs`. In the option fixture it returns
 {"Arguments":["-DmaxRecDepth=1234","-Dlinter.unusedVariables=false"],"Options":{"autoImplicit":false}}
 ```
 
-The adapter parses `-D` arguments using the registered Lean option types, then
-merges setup options with the same precedence as Lean's frontend. Other Lean
-CLI arguments fail explicitly. Dynamic libraries, plugins, package identity,
+The adapter parses `-D` arguments and merges setup options with the same
+precedence as Lean's frontend. After imports initialize option declarations,
+`Language.Lean.reparseOptions` resolves weak prefixes and imported Bool, Nat and
+String options, and rejects unknown strong options. Measurement overrides are
+applied last. Other Lean CLI arguments fail explicitly. Dynamic libraries, plugins, package identity,
 module-system mode and pre-resolved import artifacts come from `ModuleSetup`.
 `LEAN_PATH` and `LEAN_SRC_PATH` come from a `lake env` invocation of the helper.
 Explicit files outside Lake targets use `setup-file` for their imports and the
@@ -89,7 +91,9 @@ package's build options and arguments, with their module name derived by Lean.
 
 ## Measurement contract
 
-Parse each command before measuring `elabCommandAtFrontend`. Read the raw
+Parse each command before measuring `Command.elabCommandTopLevel`. Pass the
+previously parsed commands to the terminal module linters, as the Lean frontend
+does; terminal linter errors contribute to the file's `HasErrors`. Read the raw
 thread heartbeat counter and monotonic nanosecond clock immediately around
 elaboration. Name collection, sorting, hashing, diagnostics and serialization
 are outside the measurement interval. Preserve all project limits and options
@@ -100,21 +104,23 @@ Keep nodes with at least that many heartbeats, promoting retained children of
 omitted nodes. This keeps command and trace measurements independent of the
 output threshold.
 
-Install a wrapper around the imported `set_option` command elaborator. It
-restores the measurement options after the original handler, including handlers
-reached through `set_option ... in` macro expansion. Also force scopes to false
-before each top-level command. In steps mode, wrap tactic elaborator entries
-with `Leanwake.tactic` trace nodes carrying originating syntax and the syntax
-kind. A scoped extension tracks wrapped entries so newly registered tactics are
-wrapped once and section boundaries restore both registries. Unknown trace
-positions stay null; child nodes never inherit a parent's position. Read and
+Wrap every command elaborator entry, restoring measurement options before and
+after each handler. Refresh wrappers before each top-level command; a scoped
+extension tracks wrapped entries across section boundaries. This also covers
+nested `elabCommand` calls from custom elaborators. In steps mode, wrap tactic
+elaborator entries with `Leanwake.tactic` trace nodes carrying originating syntax
+and the syntax kind. A separate scoped extension tracks wrapped tactics.
+Unknown trace positions stay null; child nodes never inherit a parent's position. Read and
 write trace trees through `json_io` and drain nested children iteratively on
 drop; real profiles exceed serde_json's default nesting limit.
 
-Collect snapshot diagnostics and trace trees after measurement:
-Lean also uses completed snapshots for synchronous lazy realization. The
-fixtures exercise both source forms and check that substantial proof work is
-counted.
+Collect completed snapshot diagnostics and trace trees after measurement.
+Lean uses completed snapshots for synchronous lazy realization. Check every
+snapshot and its children without waiting; an unfinished task marks the command
+and file as errored, reports why, and stops that file. Arbitrary detached tasks
+created by user metaprograms outside Lean's snapshot registry are outside the
+measurement contract. Fixtures check nested synchronous proof costs and reject
+unfinished registered tasks in both detail modes.
 
 Keep parser diagnostics separately: Lean's top-level elaborator resets its
 message log. A file with parser, import or elaboration errors has `HasErrors`.

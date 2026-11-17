@@ -21,16 +21,44 @@ def measurementOptions (steps : Bool) (opts : Options) : Options :=
       |>.setBool `trace.profiler.useHeartbeats true |>.set `trace.profiler.output ""
   else opts
 
-def forceSynchronous (steps : Bool) (env : Environment) : Environment :=
-  Command.commandElabAttribute.ext.modifyState env fun s =>
+initialize wrappedCommands : SimpleScopedEnvExtension Name (PHashSet Name) ←
+  registerSimpleScopedEnvExtension { initial := {}, addEntry := (·.insert ·) }
+
+def forceSynchronous (steps : Bool) (env : Environment) : Environment := Id.run do
+  let wrapped := wrappedCommands.getState env
+  let mut names := wrapped
+  let state := Command.commandElabAttribute.ext.getState env
+  for entry in state.table.fold (init := []) (fun entries _ es => es ++ entries) do
+    names := names.insert entry.declName
+  let env := Command.commandElabAttribute.ext.modifyState env fun s =>
     { s with table := s.table.fold (init := {}) fun table kind entries =>
       table.insert kind (entries.map fun entry =>
-        if kind == ``Parser.Command.set_option then
+        if wrapped.contains entry.declName then entry else
           { entry with value := fun stx => do
-            entry.value stx
             Command.modifyScope fun scope =>
-              { scope with opts := measurementOptions steps scope.opts } }
-        else entry) }
+              { scope with opts := measurementOptions steps scope.opts }
+            try entry.value stx
+            finally
+              Command.modifyScope fun scope =>
+                { scope with opts := measurementOptions steps scope.opts } }) }
+  return wrappedCommands.modifyState env fun _ => names
+
+def finishedSnapshots (tasks : Array (Language.SnapshotTask Language.SnapshotTree)) :
+    IO (Array Language.Snapshot × Bool) := do
+  let mut pending := tasks.reverse
+  let mut snapshots := #[]
+  let mut unfinished := false
+  while !pending.isEmpty do
+    let task := pending.back!
+    pending := pending.pop
+    if ← IO.hasFinished task.task then
+      let tree := task.get
+      snapshots := snapshots.push tree.element
+      pending := pending ++ tree.children.reverse
+    else
+      unfinished := true
+      if let some token := task.cancelTk? then token.set
+  return (snapshots, unfinished)
 
 def wrapSourceTactic (original : Tactic.Tactic) : Tactic.Tactic := fun stx =>
   withTraceNode `Leanwake.tactic
@@ -106,6 +134,8 @@ def measureCommands (path input : String) (steps : Bool) (threshold : Nat) :
   let mut failed := false
   let mut occurrences : Std.HashMap (String × String) Nat := {}
   repeat
+    modify fun s => { s with commandState := { s.commandState with
+      env := forceSynchronous steps s.commandState.env } }
     if steps then
       modify fun s => { s with commandState := { s.commandState with
         env := instrumentTactics s.commandState.env } }
@@ -122,19 +152,23 @@ def measureCommands (path input : String) (steps : Bool) (threshold : Nat) :
     let (cmd, ps, messages) := Parser.parseCommand ictx pmctx ps cs.messages
     setParserState ps
     setMessages messages
+    let previousCommands := (← get).commands
+    modify fun s => { s with commands := s.commands.push cmd }
     let h0 ← IO.getNumHeartbeats
     let t0 ← IO.monoNanosNow
-    elabCommandAtFrontend cmd
+    runCommandElabM <| Command.elabCommandTopLevel cmd previousCommands
     let t1 ← IO.monoNanosNow
     let h1 ← IO.getNumHeartbeats
     let state ← getCommandState
+    let (snapshots, unfinished) ← finishedSnapshots state.snapshotTasks
     let mut diagnostics := messages ++ state.messages
     let mut traces := if steps then stateSteps ictx.fileMap threshold state.traceState else #[]
-    for task in state.snapshotTasks do
-      for snapshot in task.get.getAll do
-        diagnostics := diagnostics ++ snapshot.diagnostics.msgLog
-        if steps then traces := traces ++ stateSteps ictx.fileMap threshold snapshot.traces
-    let hasErrors := diagnostics.hasErrors
+    for snapshot in snapshots do
+      diagnostics := diagnostics ++ snapshot.diagnostics.msgLog
+      if steps then traces := traces ++ stateSteps ictx.fileMap threshold snapshot.traces
+    if unfinished then
+      IO.eprintln s!"{path}:{ictx.fileMap.toPosition (cmd.getPos?.getD ps.pos)}: unfinished elaboration task; synchronous measurement cannot be guaranteed"
+    let hasErrors := diagnostics.hasErrors || unfinished
     failed := failed || hasErrors
     for message in diagnostics.toList do IO.eprintln (← message.toString)
     if cmd.isOfKind ``Parser.Command.eoi then break
@@ -154,7 +188,7 @@ def measureCommands (path input : String) (steps : Bool) (threshold : Nat) :
       ("Heartbeats", toJson (h1 - h0)), ("ElapsedNs", toJson (t1 - t0)),
       ("HasErrors", toJson hasErrors)]
     rows := rows.push <| Json.mkObj (if steps then fields ++ [("Steps", toJson traces)] else fields)
-    if Parser.isTerminalCommand cmd then break
+    if unfinished || Parser.isTerminalCommand cmd then break
   return (rows, failed)
 
 def setConfigOption (opts : Options) (arg : String) : IO Options := do
@@ -183,7 +217,6 @@ unsafe def profile (req : Request) : IO Json := do
     else
       throw <| IO.userError s!"unsupported Lake Lean argument: {arg}"
   opts := opts.mergeBy (fun _ _ value => value) req.setup.options.toOptions
-  opts := measurementOptions steps opts
   let (header, ps, messages) ← Parser.parseHeader ictx
   let header : HeaderSyntax := header
   let start ← IO.monoNanosNow
@@ -194,6 +227,8 @@ unsafe def profile (req : Request) : IO Json := do
     (mainModule := req.setup.name) (package? := req.setup.package?)
     (arts := req.setup.importArts) (headerStx? := header)
   let stop ← IO.monoNanosNow
+  opts ← Language.Lean.reparseOptions opts
+  opts := measurementOptions steps opts
   let (commands, failed) ← if messages.hasErrors then do
       for message in messages.toList do IO.eprintln (← message.toString)
       pure (#[], true)
@@ -213,4 +248,5 @@ unsafe def main : IO UInt32 := do
   let req ← IO.ofExcept (Json.parse line >>= fromJson? (α := Request))
   let result ← IO.withStdout (← IO.getStderr) (profile req)
   stdout.putStrLn result.compress
-  return 0
+  stdout.flush
+  IO.Process.exit 0
