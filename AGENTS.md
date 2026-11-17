@@ -34,7 +34,7 @@ for Cargo and GitHub Actions.
 - `src/rules.rs`: embedded Lean comparison definitions and proofs.
 - `lean/` and `.leanfran/cache/`: extracted Lean and generated Rust, committed together.
 - `tools/check-rules.py`: source agreement, regeneration, axiom audit and proof mutation.
-- `audit/`: lean-assay mutation checks for the generated functions called by Rust.
+- `audit/`: leanassay mutation checks for the generated functions called by Rust.
 - `tools/check-format.py`: tracked-file formatting with isolated Git configuration.
 - `tools/check-package.py`: installed wrapper, plugin compiler, local Git dependency and PATH priority.
 - `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
@@ -167,7 +167,7 @@ than silently changing the execution conditions.
 
 On 2026-11-17, two recordings with `--jobs 4` on four Linux CPU cores measured
 61 files and 967 commands in lean-ritsuryo, and 30 files and 253 commands in
-lean-assay. Both full selections and their corresponding Lake builds succeeded
+leanassay. Both full selections and their corresponding Lake builds succeeded
 without error files. Heartbeats differed in 22 ritsuryo commands (maximum 15)
 and 16 assay commands (maximum 137). Assay's default selection of 8 files and
 133 commands matched exactly, as did the deterministic integration fixtures.
@@ -234,7 +234,7 @@ The proofs checked in `make check` include:
 - `summary_heartbeats`: base and head totals equal the heartbeat sums of the
   respective present entries, including added and removed rows.
 
-`audit/` is a separate Lake package requiring `lean/` and lean-assay at
+`audit/` is a separate Lake package requiring `lean/` and leanassay at
 `ef054d7c45ab4f9e14a201ae7e3bfbe9dd080abb`. `Audit/Core.lean` audits every generated
 function called by Rust: `matchFiles`, `summarize` and `failed`. Its local
 `Inhabited Summary` instance supplies the all-zero result

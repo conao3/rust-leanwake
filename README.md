@@ -183,10 +183,10 @@ Repeated recordings of unchanged real projects on four cores produced:
 | --- | ---: | ---: | ---: | ---: | ---: |
 | lean-ritsuryo / default | 54 | 893 | 8 | 43.1–43.5 s | 48.4 s |
 | lean-ritsuryo / all | 61 | 967 | 15 | 45.8–61.7 s | 78.1 s |
-| lean-assay / default | 8 | 133 | 0 | 14.1–17.7 s | 23.0 s |
-| lean-assay / all | 30 | 253 | 137 | 199.4–248.2 s | 147.5 s |
+| leanassay / default | 8 | 133 | 0 | 14.1–17.7 s | 23.0 s |
+| leanassay / all | 30 | 253 | 137 | 199.4–248.2 s | 147.5 s |
 
-All files had `HasErrors=false`. Small remaining differences are preserved, rather than rounded away. The deterministic integration fixture matches exactly; this is not a guarantee for arbitrary Lean metaprograms. Lean's lazy realization and kernel replay use additional internal mechanisms beyond the top-level async switch, and the precise source of the remaining variation is not isolated. Another pair of lean-assay / all recordings differed by at most 183. The default absolute threshold of 1,000 exceeds every observed difference, while the relative threshold also requires a change above 1%.
+All files had `HasErrors=false`. Small remaining differences are preserved, rather than rounded away. The deterministic integration fixture matches exactly; this is not a guarantee for arbitrary Lean metaprograms. Lean's lazy realization and kernel replay use additional internal mechanisms beyond the top-level async switch, and the precise source of the remaining variation is not isolated. Another pair of leanassay / all recordings differed by at most 183. The default absolute threshold of 1,000 exceeds every observed difference, while the relative threshold also requires a change above 1%.
 
 ## Verified rules
 
@@ -291,7 +291,7 @@ With `Detail=steps`, every command additionally has `Steps: [...]`; with `Detail
 
 ## Development
 
-`make check` runs lean-assay on the generated comparison functions to check that
+`make check` runs leanassay on the generated comparison functions to check that
 their theorems reject broken implementations; holes and audit warnings fail the check.
 
 ```sh
