@@ -1,0 +1,104 @@
+# Leanwake development
+
+Use Rust edition 2024, clap derive, serde, flake-parts and treefmt-nix. Lean and
+Lake are fixed to 4.35.0. Keep code, tests and documentation in English. Write
+code without comments, trailing spaces or alignment padding. End files with a
+newline. Environment variables used by the host are required inputs.
+
+Run `nix develop --command make check` and
+`nix build --option cores 4 --max-jobs 1`. Run `nix fmt`, inspect the staged diff
+and commit each completed unit. Add new Lean and Nix files to Git before using
+Nix. On Linux, use `taskset -c 0-3` around builds and benchmark commands to limit
+the entire process tree to four cores. Use `cargo -j 4` for Rust builds.
+
+## Responsibilities
+
+- `src/cli.rs`: the command tree, help and file-valued parameters.
+- `src/project.rs`: Lake discovery, setup, selection and bounded file workers.
+- `src/process.rs`: child pipes, cleanup and Linux parent-death signals.
+- `src/model.rs`: the PascalCase schema, version 1.
+- `src/main.rs`: exit codes, listing and output formats.
+- `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
+- `native/Main.lean`: synchronous elaboration, ranges, names and measurements.
+- `native/Sha256.lean`: SHA-256 for source identity and unnamed command keys.
+- `tests/profile.rs` and `tests/fixtures/`: executable acceptance tests.
+
+The Rust host owns I/O and orchestration. Native Lean owns compiler state and
+measurement. The next stage introduces comparison definitions and proofs in
+Lean and uses leanfran to generate the Rust comparison core. Native runtime
+objects stay inside the adapter process; the boundary uses JSON.
+
+## Lake 4.35.0 discovery
+
+The pinned nixpkgs revision `e126e9e73c335158ff8279ac14d5f4afec153716`
+provides `Lean (version 4.35.0, Release)`. The flake lock preserves this revision.
+
+The fixture produced these actual query results (the absolute project prefix
+in the source path is replaced with `<project>`):
+
+```text
+lake -J query :defaultModules
+["Sample.Basic","Sample.Options","Sample"]
+lake -J query +Sample.Basic:lean
+"<project>/Sample/Basic.lean"
+lake -J query +Sample.Basic:setup
+{"dynlibs":[],"importArts":{},"isModule":false,"name":"Sample.Basic","options":{"autoImplicit":false},"package":"sample","plugins":[]}
+```
+
+The host expands `:defaultModules` with `:transImports`, queries each `:lean`
+path, and keeps source files in the project outside hidden directories. This
+handles executable roots, library globs and source directories through Lake.
+`:setup` builds imports, plugins and other module dependencies before returning
+`ModuleSetup`. Preparation is serial to avoid concurrent Lake writers. Adapter
+processes then run with at most `--jobs` files in parallel.
+
+`lake setup-file Sample/Basic.lean` returned the same setup JSON for this basic
+fixture. Its implementation uses `Module.serverOptions`, however, whereas
+`:setup` uses the build's `Module.leanOptions`. Use `:setup` for registered
+modules. `native/Project.lean` loads the workspace with Lake's own loader and
+reads `Module.weakLeanArgs ++ Module.leanArgs`. In the option fixture it returns:
+
+```json
+{"Arguments":["-DmaxRecDepth=1234","-Dlinter.unusedVariables=false"],"Options":{"autoImplicit":false}}
+```
+
+The adapter parses `-D` arguments using the registered Lean option types, then
+merges setup options with the same precedence as Lean's frontend. Other Lean
+CLI arguments fail explicitly. Dynamic libraries, plugins, package identity,
+module-system mode and pre-resolved import artifacts come from `ModuleSetup`.
+`LEAN_PATH` and `LEAN_SRC_PATH` come from a `lake env` invocation of the helper.
+Explicit files outside Lake targets use `setup-file` for their imports and the
+package's build options and arguments, with their module name derived by Lean.
+
+## Measurement contract
+
+Parse each command before measuring `elabCommandAtFrontend`. Read the raw
+thread heartbeat counter and monotonic nanosecond clock immediately around
+elaboration. Name collection, sorting, hashing, diagnostics and serialization
+are outside the measurement interval. Preserve all project limits and options
+except `Elab.async`, which is forced to false.
+
+Install a wrapper around the imported `set_option` command elaborator. It
+restores `Elab.async=false` after the original handler, including handlers
+reached through `set_option ... in` macro expansion. Also force scopes to false
+before each top-level command. Collect snapshot diagnostics after measurement:
+Lean also uses completed snapshots for synchronous lazy realization. The
+fixtures exercise both source forms and check that substantial proof work is counted.
+
+Keep parser diagnostics separately: Lean's top-level elaborator resets its
+message log. A file with parser, import or elaboration errors has `HasErrors`.
+Report each command's own errors without carrying an earlier command's errors
+into subsequent commands. Redirect elaborator standard output to standard
+error so that `#eval IO.println` preserves the JSON protocol.
+
+Collect new constants with declaration-range metadata. Sort by declaration
+range start and then lexicographically by name. The first name is `Key`. For
+unnamed commands, hash the UTF-8 source from the syntax start to its tail,
+excluding surrounding trivia, and use the first 12 SHA-256 hex digits plus a
+one-based occurrence number for that exact kind and source in the file.
+
+Tests check repeatability, source hashing, duplicate examples, names, module
+paths, plugins, configuration mutations, heartbeat limits, syntax errors,
+continued recording, all help levels, exit codes, PascalCase and file/stdin
+inputs. Unsupported toolchains and unsupported compiler arguments fail rather
+than silently changing the execution conditions.

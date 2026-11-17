@@ -1,0 +1,17 @@
+name = "layout"
+srcDir = "src"
+defaultTargets = ["First", "runner"]
+
+[[lean_lib]]
+name = "First"
+
+[[lean_lib]]
+name = "Plugin"
+precompileModules = true
+
+[[lean_lib]]
+name = "Unused"
+
+[[lean_exe]]
+name = "runner"
+root = "App"

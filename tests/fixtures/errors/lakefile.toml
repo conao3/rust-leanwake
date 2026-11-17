@@ -1,0 +1,6 @@
+name = "errors"
+defaultTargets = ["Errors"]
+
+[[lean_lib]]
+name = "Errors"
+globs = ["Errors.+"]

@@ -1,0 +1,8 @@
+name = "budget"
+defaultTargets = ["Budget"]
+
+[leanOptions]
+maxHeartbeats = 1
+
+[[lean_lib]]
+name = "Budget"

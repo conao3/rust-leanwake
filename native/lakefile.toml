@@ -1,0 +1,16 @@
+name = "leanwake-adapter"
+version = "0.1.0"
+defaultTargets = ["leanwake-adapter", "leanwake-project"]
+
+[[lean_exe]]
+name = "leanwake-adapter"
+root = "Main"
+supportInterpreter = true
+
+[[lean_exe]]
+name = "leanwake-project"
+root = "Project"
+supportInterpreter = true
+
+[[lean_lib]]
+name = "Sha256"

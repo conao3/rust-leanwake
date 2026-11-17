@@ -1,0 +1,5 @@
+name = "modules"
+defaultTargets = ["Modules"]
+
+[[lean_lib]]
+name = "Modules"

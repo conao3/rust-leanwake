@@ -1,0 +1,5 @@
+/target/
+/result
+/native/.lake/
+/tests/fixtures/**/.lake/
+/tests/fixtures/**/lake-manifest.json

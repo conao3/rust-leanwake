@@ -1,0 +1,11 @@
+name = "sample"
+version = "0.1.0"
+defaultTargets = ["Sample"]
+weakLeanArgs = ["-DmaxRecDepth=1234"]
+moreLeanArgs = ["-Dlinter.unusedVariables=false"]
+
+[leanOptions]
+autoImplicit = false
+
+[[lean_lib]]
+name = "Sample"
