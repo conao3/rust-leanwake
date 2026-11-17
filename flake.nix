@@ -2,6 +2,8 @@
   description = "Leanwake: command elaboration profiles for Lake projects";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    leanfran.url = "github:conao3/lean-leanfran/1bb464c6d419da8037698053f52dd23476a042d9";
+    leanfran.inputs.nixpkgs.follows = "nixpkgs";
     flake-parts.url = "github:hercules-ci/flake-parts";
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
@@ -17,7 +19,7 @@
         "aarch64-darwin"
       ];
       perSystem =
-        { pkgs, ... }:
+        { pkgs, system, ... }:
         let
           lean =
             assert pkgs.lib.assertMsg (
@@ -50,6 +52,7 @@
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.makeWrapper ];
             nativeCheckInputs = [ lean ];
+            LEANFRAN_OFFLINE = "1";
             LEANWAKE_ADAPTER = "${adapter}/bin/leanwake-adapter";
             checkPhase = "cargo test -j 4 -- --test-threads=1";
             LEAN_SYSROOT = "${lean}";
@@ -63,6 +66,7 @@
           };
           devShells.default = pkgs.mkShell {
             packages = [
+              inputs.leanfran.packages.${system}.rust-compiler
               pkgs.cargo
               pkgs.rustc
               pkgs.rustfmt
@@ -74,6 +78,7 @@
               pkgs.ruff
             ];
             LEAN_SYSROOT = "${lean}";
+            LEANFRAN_CLI = "${inputs.leanfran.packages.${system}.rust-compiler}/bin/leanfran";
             shellHook = ''export LEANWAKE_ADAPTER="$PWD/native/.lake/build/bin/leanwake-adapter"'';
           };
           treefmt.programs.nixfmt.enable = true;

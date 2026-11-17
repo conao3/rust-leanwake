@@ -18,15 +18,20 @@ the entire process tree to four cores. Use `cargo -j 4` for Rust builds.
 - `src/process.rs`: child pipes, cleanup and Linux parent-death signals.
 - `src/model.rs`: the PascalCase schema, version 1.
 - `src/main.rs`: exit codes, listing and output formats.
+- `src/compare.rs`: profile validation, metadata lookup, sorting and output.
+- `src/rules.rs`: embedded Lean comparison definitions and proofs.
+- `lean/` and `.leanfran/cache/`: extracted Lean and generated Rust, committed together.
+- `tools/check-rules.py`: source agreement, regeneration, axiom audit and proof mutation.
 - `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
 - `native/Main.lean`: synchronous elaboration, ranges, names and measurements.
 - `native/Sha256.lean`: SHA-256 for source identity and unnamed command keys.
 - `tests/profile.rs` and `tests/fixtures/`: executable acceptance tests.
 
 The Rust host owns I/O and orchestration. Native Lean owns compiler state and
-measurement. The next stage introduces comparison definitions and proofs in
-Lean and uses leanfran to generate the Rust comparison core. Native runtime
-objects stay inside the adapter process; the boundary uses JSON.
+measurement. The embedded Lean core owns classification, matching by `(Path, Key)`,
+summary counts and heartbeat totals, and regression failure. Rust calls the generated
+`match_entries`, `summarize` and `failed` functions in the comparison path.
+Native runtime objects stay inside the adapter process; the boundary uses JSON.
 
 ## Lake 4.35.0 discovery
 
@@ -124,11 +129,60 @@ Keep raw counters; do not round these differences away. Lean 4.35.0's
 realization work, and `realizeConst` schedules kernel replay tasks independently
 of the top-level elaboration option. The precise source of the remaining small
 differences has not been isolated. Use the measured variation when choosing
-comparison thresholds in stage 2. One task worker alone did not eliminate the
+comparison thresholds. One task worker alone did not eliminate the
 variation in a repeated single-file experiment.
 
 Keys follow the specified declaration-name rule and are scoped by file, not
 globally unique across a profile. The full ritsuryo selection has `main` in four
 files; assay has 24 keys each occurring in two different files. The repeatability
-measurements match `(Path, Key)` pairs. Stage 2 must account for this file context
-when matching commands instead of overwriting duplicate names in a global map.
+measurements and comparisons match `(Path, Key)` pairs. Reject duplicate pairs
+within each input before calling the generated matcher.
+
+## Comparison rules and proofs
+
+`src/rules.rs` is the source for the `core` Lean block. `grows b h a r` means
+`a < h - b` and `b * r < (h - b) * 100`, with all operations on `Nat`.
+`classify` first tests growth and then the same predicate with inputs reversed.
+The generated runtime uses arbitrary precision naturals, including intermediate
+products and totals. Rust accepts heartbeat fields and thresholds as `u64` and
+serializes totals and signed deltas as exact JSON integers.
+
+`takeMatch` removes the first head entry with the same path and key. `matchEntries`
+consumes the base list, classifies matched entries, marks absent entries removed,
+and marks the remaining head entries added. Duplicate input identities are rejected
+by Rust. The matcher has quadratic worst-case time in the number of commands.
+
+The proofs checked in `make check` include:
+
+- `equal_unchanged`: equal heartbeat counts classify as unchanged.
+- `swap_classification`: reversing inputs reverses regression and improvement.
+- `regression_monotone`: increasing the head preserves a regression.
+- `regression_thresholds` and `improvement_thresholds`: increasing either threshold
+  cannot introduce a regression or improvement.
+- `matching_base_once`: the base projection of the result equals the input list.
+- `matching_head_once`: the head projection is a permutation of the input list.
+- `summary_regressed`: the regression count equals the number of regressed rows.
+- `failure_iff_regression`: failure holds exactly when a regressed row exists.
+
+The helper lemmas are checked with these theorems. The axiom audit permits only
+Lean's standard `propext`, `Classical.choice` and `Quot.sound`. A deliberately
+incorrect unchanged branch must fail proof checking on every `make check`.
+
+Run `nix develop --command cargo build -j 4` after changing embedded Lean to extract
+and generate through `build.rs`. The dev shell sets `LEANFRAN_CLI` to the compiler
+from the pinned leanfran input. Add new `lean/` and `.leanfran/cache/` files before
+invoking Nix again, then run `nix develop --command make check`. That command checks
+that the extracted source matches the embedded block, rebuilds the Lean package,
+regenerates Rust and compares it byte for byte with the cache, audits every theorem,
+and runs CLI acceptance tests. Commit the source and both generated directories.
+`nix build` sets `LEANFRAN_OFFLINE=1` and builds from the committed cache inside the
+network-isolated Nix build. A missing cache is an error.
+
+Comparison validation checks `SchemaVersion`, `Toolchain` and `Conditions` before
+classification and prints both values for every differing field. Reject errored
+files, errored commands and duplicate pairs on either side. The supported profile
+schema and conditions remain version 1, synchronous elaboration and detail none.
+Missing sides of added or removed commands are JSON null; their delta uses zero
+for that side. Ranges come from head when present and from base for removals.
+Omit unchanged rows and order regressions first by descending delta, then use
+status, descending delta, path and key for deterministic output.

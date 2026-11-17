@@ -1,0 +1,6 @@
+name = "leanwake"
+defaultTargets = ["LeanRustGen"]
+
+[[lean_lib]]
+name = "LeanRustGen"
+globs = ["LeanRustGen.+"]

@@ -13,6 +13,13 @@ fn path(input: &str) -> Result<PathBuf, String> {
     value(input).map(|s| PathBuf::from(s.trim_end_matches(['\n', '\r'])))
 }
 
+fn natural(input: &str) -> Result<u64, String> {
+    value(input)?
+        .trim()
+        .parse::<u64>()
+        .map_err(|e| e.to_string())
+}
+
 fn positive(input: &str) -> Result<usize, String> {
     let n = value(input)?
         .trim()
@@ -73,6 +80,8 @@ pub enum ProfileCommand {
         #[arg(long, value_parser = positive)]
         limit: Option<usize>,
     },
+    #[command(about = "Compare profiles using verified heartbeat rules")]
+    CompareProfiles(Compare),
     #[command(about = "List totals for each file")]
     ListFiles {
         #[arg(long, value_parser = value)]
@@ -90,4 +99,16 @@ pub struct Record {
     pub output_file: Option<PathBuf>,
     #[arg(long, default_value = "1", value_parser = positive)]
     pub jobs: usize,
+}
+
+#[derive(Args)]
+pub struct Compare {
+    #[arg(long, value_parser = value)]
+    pub base_profile: String,
+    #[arg(long, value_parser = value)]
+    pub head_profile: String,
+    #[arg(long, default_value = "1", value_parser = natural)]
+    pub relative_threshold_percent: u64,
+    #[arg(long, default_value = "1000", value_parser = natural)]
+    pub absolute_threshold_heartbeats: u64,
 }

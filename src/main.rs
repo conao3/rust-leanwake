@@ -1,8 +1,10 @@
 mod cli;
+mod compare;
 mod error;
 mod model;
 mod process;
 mod project;
+mod rules;
 
 use clap::{CommandFactory, Parser};
 use cli::{Cli, Command, Output, ProfileCommand};
@@ -85,6 +87,7 @@ fn run(cli: Cli) -> Result<u8> {
     process::DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
     let Command::Profile { command } = cli.command;
     match command {
+        ProfileCommand::CompareProfiles(options) => compare::run(options, cli.output),
         ProfileCommand::RecordProfile(options) => {
             let profile = project::record(&options)?;
             let failed = profile.files.iter().any(|file| file.has_errors);
