@@ -1515,3 +1515,28 @@ fn help_accepts_global_options_without_changing_parameter_values() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("help"));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("Usage:"));
 }
+
+#[test]
+fn single_file_comparisons_handle_twenty_thousand_commands() {
+    let mut profile = synthetic_profile(&[("Large.lean", "template", 100)]);
+    let template = profile["Files"][0]["Commands"][0].clone();
+    profile["Files"][0]["Commands"] = Value::Array(
+        (0..20_000)
+            .map(|index| {
+                let mut command = template.clone();
+                command["Key"] = json!(format!("command{index}"));
+                command
+            })
+            .collect(),
+    );
+    let mut head = profile.clone();
+    head["Files"][0]["Commands"]
+        .as_array_mut()
+        .unwrap()
+        .reverse();
+    let result = comparison(&profile, &head, &[], 0);
+    assert_eq!(result["Summary"]["Unchanged"], 20_000);
+    assert_eq!(result["Summary"]["BaseHeartbeats"], 2_000_000);
+    assert_eq!(result["Summary"]["HeadHeartbeats"], 2_000_000);
+    assert_eq!(result["Commands"], json!([]));
+}

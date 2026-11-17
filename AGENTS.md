@@ -211,7 +211,9 @@ Lean's standard `propext`, `Classical.choice` and `Quot.sound`. A deliberately
 incorrect unchanged branch and dropping the first file must each fail proof
 checking on every `make check`. The 100,000-command integration test reverses
 both file and command order and checks unchanged, regressed, improved, added
-and removed counts, totals and identities without a timing assertion.
+and removed counts, totals and identities without a timing assertion. A separate
+single-file test reverses 20,000 commands and checks exact counts and totals on
+the standard process stack.
 
 Run `nix develop --command cargo build -j 4` after changing embedded Lean to extract
 and generate through `build.rs`. The dev shell sets `LEANFRAN_CLI` to the compiler
