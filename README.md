@@ -204,9 +204,11 @@ The source is [`src/rules.rs`](src/rules.rs). `leanfran` extracts it into `lean/
 | `matching_base_once`, `matching_head_once` | Every input occurrence appears exactly once in the result. |
 | `matching_files_base_once`, `matching_files_head_once` | File grouping preserves every base and head occurrence exactly once. |
 | `summary_acc_regressed`, `summary_regressed` | The fold's regression total equals the initial count plus the number of regressed rows. |
+| `summary_acc_counts`, `summary_counts` | Improved, unchanged, added and removed counts equal their initial counts plus the numbers of rows with those statuses. |
+| `summary_acc_heartbeats`, `summary_heartbeats` | Base and head totals equal their initial totals plus the heartbeat sums of the respective present entries. |
 | `failure_iff_regression` | Failure holds exactly when a regression exists. |
 
-`make check` checks 18 theorems and audits their axioms, accepting only Lean's standard `propext`, `Classical.choice` and `Quot.sound`; regenerates Rust and checks byte-for-byte agreement; and verifies that deliberately wrong classification and dropped-file implementations fail proof checking. Proofs cover the comparison definitions, while integration tests exercise file selection, native measurement and the host boundary.
+`make check` checks 22 theorems and audits their axioms, accepting only Lean's standard `propext`, `Classical.choice` and `Quot.sound`; regenerates Rust and checks byte-for-byte agreement; and verifies that deliberately wrong classification and dropped-file implementations fail proof checking. Proofs cover the comparison definitions, while integration tests exercise file selection, native measurement and the host boundary.
 
 ## Profile format
 
@@ -288,6 +290,9 @@ With `Detail=steps`, every command additionally has `Steps: [...]`; with `Detail
 - [lean-source-profiler](https://github.com/Vilin97/lean-source-profiler): source-level timing logs, VS Code overlays and a repository viewer.
 
 ## Development
+
+`make check` runs lean-assay on the generated comparison functions to check that
+their theorems reject broken implementations; holes and audit warnings fail the check.
 
 ```sh
 nix develop --command make check

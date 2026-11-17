@@ -34,6 +34,7 @@ for Cargo and GitHub Actions.
 - `src/rules.rs`: embedded Lean comparison definitions and proofs.
 - `lean/` and `.leanfran/cache/`: extracted Lean and generated Rust, committed together.
 - `tools/check-rules.py`: source agreement, regeneration, axiom audit and proof mutation.
+- `audit/`: lean-assay mutation checks for the generated functions called by Rust.
 - `tools/check-format.py`: tracked-file formatting with isolated Git configuration.
 - `tools/check-package.py`: installed wrapper, plugin compiler, local Git dependency and PATH priority.
 - `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
@@ -206,11 +207,17 @@ growth proportional to the total number of rows.
 
 The proofs checked in `make check` include:
 
+- `grows_lt`: growth requires a strictly larger head heartbeat count.
+- `grows_asymmetric`: growth in one direction excludes growth in the other.
+- `classify_regressed`: regression holds exactly when forward growth exceeds both thresholds.
+- `classify_improved`: improvement holds exactly when reverse growth exceeds both thresholds.
 - `equal_unchanged`: equal heartbeat counts classify as unchanged.
 - `swap_classification`: reversing inputs reverses regression and improvement.
 - `regression_monotone`: increasing the head preserves a regression.
+- `grows_thresholds`: increasing either threshold can only restrict growth.
 - `regression_thresholds` and `improvement_thresholds`: increasing either threshold
   cannot introduce a regression or improvement.
+- `takeMatch_conservation`: the extracted match and remainder preserve every head entry.
 - `matching_base_once`: the base projection of the result equals the input list.
 - `matching_head_once`: the head projection is a permutation of the input list.
 - `matching_files_base_once` and `matching_files_head_once`: the same occurrence
@@ -218,6 +225,34 @@ The proofs checked in `make check` include:
 - `summary_acc_regressed`: the fold preserves the initial regression count.
 - `summary_regressed`: the regression count equals the number of regressed rows.
 - `failure_iff_regression`: failure holds exactly when a regressed row exists.
+- `summary_acc_counts`: the fold adds improved, unchanged, added and removed row
+  counts to the corresponding initial counts.
+- `summary_counts`: improved, unchanged, added and removed counts equal the
+  numbers of rows with those statuses.
+- `summary_acc_heartbeats`: the fold adds each side's present-entry heartbeat sum
+  to that side's initial total.
+- `summary_heartbeats`: base and head totals equal the heartbeat sums of the
+  respective present entries, including added and removed rows.
+
+`audit/` is a separate Lake package requiring `lean/` and lean-assay at
+`ef054d7c45ab4f9e14a201ae7e3bfbe9dd080abb`. `Audit/Core.lean` audits every generated
+function called by Rust: `matchFiles`, `summarize` and `failed`. Its local
+`Inhabited Summary` instance supplies the all-zero result
+for the default-result mutation of `summarize`.
+
+| Function | Mutants | Killed | Holes | Untested | Equivalent | Timed out | Stillborn |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `matchFiles` | 2 | 2 | 0 | 0 | 0 | 0 | 0 |
+| `summarize` | 1 | 1 | 0 | 0 | 0 | 0 | 0 |
+| `failed` | 7 | 7 | 0 | 0 | 0 | 0 | 0 |
+
+`lake -d audit build --wfail` rejects a missing theorem, zero killed mutations,
+holes, and possibly vacuous hypotheses. Each generated function added to the Rust
+call path gets a useful theorem and an `#assay` line in the same change. The audit
+mutates the named function's body; the helper definitions keep their original
+bodies. Equivalent means equal outputs on the sampled inputs, with the default
+sample size bounded by 30. The audit complements the kernel-checked proofs and
+the classification and file-conservation mutations below.
 
 The helper lemmas are checked with these theorems. The axiom audit permits only
 Lean's standard `propext`, `Classical.choice` and `Quot.sound`. A deliberately
@@ -234,7 +269,8 @@ from the pinned leanfran input. Add new `lean/` and `.leanfran/cache/` files bef
 invoking Nix again, then run `nix develop --command make check`. That command checks
 that the extracted source matches the embedded block, rebuilds the Lean package,
 regenerates Rust and compares it byte for byte with the cache, audits every theorem,
-and runs CLI acceptance tests. Commit the source and both generated directories.
+checks `lake -d audit build --wfail`, and runs CLI acceptance tests. Commit the
+source and both generated directories, plus the audit manifest and toolchain.
 `nix build` sets `LEANFRAN_OFFLINE=1` and builds from the committed cache inside the
 network-isolated Nix build. A missing cache is an error.
 

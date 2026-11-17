@@ -212,5 +212,48 @@ leanfran::lean! {
     theorem failure_iff_regression (rows : List Row) :
         failed (summarize rows) = true ↔ ∃ row ∈ rows, row.status = .regressed := by
       simp [failed, summary_regressed, List.length_pos_iff, List.filter_eq_nil_iff]
+
+    theorem summary_acc_counts (rows : List Row) (s : Summary) :
+        (rows.foldl addRow s).improved =
+          s.improved + (rows.filter (·.status == .improved)).length ∧
+        (rows.foldl addRow s).unchanged =
+          s.unchanged + (rows.filter (·.status == .unchanged)).length ∧
+        (rows.foldl addRow s).added =
+          s.added + (rows.filter (·.status == .added)).length ∧
+        (rows.foldl addRow s).removed =
+          s.removed + (rows.filter (·.status == .removed)).length := by
+      induction rows generalizing s with
+      | nil => simp
+      | cons row rows ih =>
+        have step := ih (addRow s row)
+        cases status : row.status <;>
+          simpa [List.foldl_cons, List.filter_cons, addRow, status, Nat.add_assoc, Nat.add_comm] using step
+
+    theorem summary_counts (rows : List Row) :
+        (summarize rows).improved = (rows.filter (·.status == .improved)).length ∧
+        (summarize rows).unchanged = (rows.filter (·.status == .unchanged)).length ∧
+        (summarize rows).added = (rows.filter (·.status == .added)).length ∧
+        (summarize rows).removed = (rows.filter (·.status == .removed)).length := by
+      simpa [summarize] using summary_acc_counts rows {}
+
+    theorem summary_acc_heartbeats (rows : List Row) (s : Summary) :
+        (rows.foldl addRow s).baseHeartbeats =
+          s.baseHeartbeats + ((rows.filterMap Row.base).map Entry.heartbeats).sum ∧
+        (rows.foldl addRow s).headHeartbeats =
+          s.headHeartbeats + ((rows.filterMap Row.head).map Entry.heartbeats).sum := by
+      induction rows generalizing s with
+      | nil => simp
+      | cons row rows ih =>
+        have step := ih (addRow s row)
+        cases base : row.base <;> cases head : row.head <;>
+          simpa [List.foldl_cons, List.filterMap_cons, addRow, entryHeartbeats,
+            base, head, Nat.add_assoc] using step
+
+    theorem summary_heartbeats (rows : List Row) :
+        (summarize rows).baseHeartbeats =
+          ((rows.filterMap Row.base).map Entry.heartbeats).sum ∧
+        (summarize rows).headHeartbeats =
+          ((rows.filterMap Row.head).map Entry.heartbeats).sum := by
+      simpa [summarize] using summary_acc_heartbeats rows {}
     "#
 }
