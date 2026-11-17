@@ -19,7 +19,12 @@
         "aarch64-darwin"
       ];
       perSystem =
-        { pkgs, system, ... }:
+        {
+          config,
+          pkgs,
+          system,
+          ...
+        }:
         let
           lean =
             assert pkgs.lib.assertMsg (
@@ -57,7 +62,20 @@
             checkPhase = "cargo test -j 4 -- --test-threads=1";
             LEAN_SYSROOT = "${lean}";
             postInstall = ''
-              wrapProgram $out/bin/leanwake --set LEANWAKE_ADAPTER ${adapter}/bin/leanwake-adapter --set LEAN_SYSROOT ${lean} --prefix PATH : ${pkgs.lib.makeBinPath [ lean ]}
+              wrapProgram $out/bin/leanwake --set LEANWAKE_ADAPTER ${adapter}/bin/leanwake-adapter --set LEAN_SYSROOT ${lean} --prefix PATH : ${pkgs.lib.makeBinPath [ lean ]} --suffix PATH : ${
+                pkgs.lib.makeBinPath [
+                  pkgs.stdenv.cc
+                  pkgs.git
+                ]
+              }
+            '';
+            doInstallCheck = true;
+            nativeInstallCheckInputs = [
+              pkgs.python3
+              pkgs.git
+            ];
+            installCheckPhase = ''
+              python3 tools/check-package.py "$out/bin/leanwake"
             '';
             meta = {
               mainProgram = "leanwake";
@@ -80,6 +98,18 @@
             LEAN_SYSROOT = "${lean}";
             LEANFRAN_CLI = "${inputs.leanfran.packages.${system}.rust-compiler}/bin/leanfran";
             shellHook = ''export LEANWAKE_ADAPTER="$PWD/native/.lake/build/bin/leanwake-adapter"'';
+          };
+          treefmt.flakeFormatter = false;
+          formatter = pkgs.writeShellApplication {
+            name = "format-tracked";
+            runtimeInputs = [
+              pkgs.git
+              pkgs.findutils
+            ];
+            text = ''
+              cd "$(git rev-parse --show-toplevel)"
+              git ls-files --cached -z | xargs -0 -r ${config.treefmt.build.wrapper}/bin/treefmt "$@"
+            '';
           };
           treefmt.programs.nixfmt.enable = true;
           treefmt.programs.rustfmt.enable = true;

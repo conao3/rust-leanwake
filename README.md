@@ -10,7 +10,7 @@ With [Nix](https://nixos.org/download/) and flakes enabled:
 nix run github:conao3/rust-leanwake -- help
 ```
 
-The package supplies the Rust CLI, native Lean adapter and pinned Lean/Lake toolchain. To build a local checkout:
+The package supplies the Rust CLI, native Lean adapter, pinned Lean/Lake toolchain, C compiler and Git. Compiler and Git paths are appended to PATH so caller-provided tools take precedence. To build a local checkout:
 
 ```sh
 nix build
@@ -295,7 +295,7 @@ nix build
 git config core.hooksPath .githooks
 ```
 
-`make check` builds both components, checks formatting and Clippy, checks the Lean proofs and generated Rust, and runs executable integration tests. `nix build` builds the packaged CLI and adapters with `LEANFRAN_OFFLINE=1` and runs integration tests inside the Nix sandbox. The pre-commit hook and GitHub Actions use `make check`. See [`AGENTS.md`](AGENTS.md) for component responsibilities and regeneration commands.
+`make check` builds both components, checks formatting and Clippy, checks the Lean proofs and generated Rust, runs executable integration tests, and builds and tests the installed package. `nix fmt` formats Git-tracked files; stage new source files before checking them. `nix build` builds the packaged CLI and adapters with `LEANFRAN_OFFLINE=1` and runs integration tests inside the Nix sandbox. Installation tests invoke the actual wrapper with an empty PATH to compile a plugin and fetch a local Git dependency, then check that caller-provided compiler and Git commands take precedence. The pre-commit hook and GitHub Actions use `make check`. See [`AGENTS.md`](AGENTS.md) for component responsibilities and regeneration commands.
 
 ## License
 

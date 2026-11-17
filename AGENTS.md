@@ -8,7 +8,8 @@ newline. Environment variables used by the host are required inputs.
 Run `nix develop --command make check` and
 `nix build --option cores 4 --max-jobs 1`. Run `nix fmt`, inspect the staged diff
 and commit each completed unit. Add new Lean and Nix files to Git before using
-Nix. Limit local builds and benchmarks to at most four available CPUs. Use
+Nix. Formatting passes only Git-tracked paths to treefmt, and the check verifies
+that untracked local files are excluded. Limit local builds and benchmarks to at most four available CPUs. Use
 `cargo -j 4` for Rust builds. Tests and CI must not require fixed CPU numbers.
 
 Enable the repository's pre-commit check with `git config core.hooksPath .githooks`.
@@ -32,6 +33,8 @@ for Cargo and GitHub Actions.
 - `src/rules.rs`: embedded Lean comparison definitions and proofs.
 - `lean/` and `.leanfran/cache/`: extracted Lean and generated Rust, committed together.
 - `tools/check-rules.py`: source agreement, regeneration, axiom audit and proof mutation.
+- `tools/check-format.py`: tracked-file formatting with isolated Git configuration.
+- `tools/check-package.py`: installed wrapper, plugin compiler, local Git dependency and PATH priority.
 - `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
 - `native/Main.lean`: synchronous elaboration, ranges, names and measurements.
 - `native/Sha256.lean`: SHA-256 for source identity and unnamed command keys.

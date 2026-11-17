@@ -1,5 +1,4 @@
 /target/
-/.claude-dev/
 /result
 /native/.lake/
 /tests/fixtures/**/.lake/
