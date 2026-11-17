@@ -39,6 +39,8 @@ in the source path is replaced with `<project>`):
 ```text
 lake -J query :defaultModules
 ["Sample.Basic","Sample.Options","Sample"]
+lake -J query +Sample:transImports
+["Sample.Basic","Sample.Options"]
 lake -J query +Sample.Basic:lean
 "<project>/Sample/Basic.lean"
 lake -J query +Sample.Basic:setup
@@ -124,3 +126,9 @@ of the top-level elaboration option. The precise source of the remaining small
 differences has not been isolated. Use the measured variation when choosing
 comparison thresholds in stage 2. One task worker alone did not eliminate the
 variation in a repeated single-file experiment.
+
+Keys follow the specified declaration-name rule and are scoped by file, not
+globally unique across a profile. The full ritsuryo selection has `main` in four
+files; assay has 24 keys each occurring in two different files. The repeatability
+measurements match `(Path, Key)` pairs. Stage 2 must account for this file context
+when matching commands instead of overwriting duplicate names in a global map.
