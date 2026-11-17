@@ -511,7 +511,7 @@ fn stdin_profiles_and_file_parameters_work() {
 }
 
 #[test]
-fn module_realization_snapshots_preserve_success_and_heartbeats() {
+fn module_realization_snapshots_preserve_success_and_unchanged_comparisons() {
     let root = fixture("modules");
     assert_code(&lake_build(&root), 0);
     let first = record(&root, 0);
@@ -523,13 +523,19 @@ fn module_realization_snapshots_preserve_success_and_heartbeats() {
         .unwrap();
     assert_eq!(theorem["HasErrors"], false);
     assert!(theorem["Heartbeats"].as_u64().unwrap() > 100_000);
-    let signature = |profile: &Value| {
+    let keys = |profile: &Value| {
         commands(profile)
             .iter()
-            .map(|row| (row["Key"].clone(), row["Heartbeats"].clone()))
+            .map(|row| row["Key"].clone())
             .collect::<Vec<_>>()
     };
-    assert_eq!(signature(&first), signature(&second));
+    assert_eq!(keys(&first), keys(&second));
+    let result = comparison(&first, &second, &[], 0);
+    assert_eq!(result["Summary"]["Unchanged"], rows.len());
+    assert_eq!(result["Summary"]["Regressed"], 0);
+    assert_eq!(result["Summary"]["Improved"], 0);
+    assert_eq!(result["Summary"]["Added"], 0);
+    assert_eq!(result["Summary"]["Removed"], 0);
 }
 
 #[cfg(target_os = "linux")]
