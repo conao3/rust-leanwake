@@ -6,7 +6,13 @@ from pathlib import Path
 root = Path(__file__).resolve().parent.parent
 assert ".claude-dev" not in (root / ".gitignore").read_text()
 (root / "target").mkdir(exist_ok=True)
-env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+env = {
+    **{
+        name: value for name, value in os.environ.items() if not name.startswith("GIT_")
+    },
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+}
 system = subprocess.check_output(
     ["nix", "eval", "--raw", "--impure", "--expr", "builtins.currentSystem"], text=True
 ).strip()
