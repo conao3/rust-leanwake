@@ -24,7 +24,8 @@ for Cargo and GitHub Actions.
 
 - `src/cli.rs`: the command tree, help and file-valued parameters.
 - `src/project.rs`: Lake discovery, setup, selection and bounded file workers.
-- `src/process.rs`: child pipes, cleanup and Linux parent-death signals.
+- `src/process.rs`: child pipes and supervisor lifetime channels.
+- `src/bin/leanwake-supervisor.rs`: process groups, host-death detection and descendant cleanup.
 - `src/model.rs`: the PascalCase schema, version 1.
 - `src/json_io.rs`: stack-growing JSON decoding and serialization for deep traces.
 - `src/main.rs`: exit codes, command and file listings, and output formats.
@@ -145,10 +146,19 @@ Tests check repeatability, source hashing, duplicate examples, names, module
 paths, plugins, configuration mutations, heartbeat limits, syntax errors,
 continued recording after failed imports, explicit hidden paths and symlink
 ancestors, all help levels, exit codes, PascalCase and file/stdin inputs.
-The Linux process test waits for the child's PID readiness signal, kills the
-host, and polls process state until the child dies. Its 120-second startup and
-30-second termination deadlines are watchdogs, not expected execution times.
-The long-running child cannot exit normally within either watchdog interval.
+Each subprocess runs through a supervisor in a separate process group. The
+supervisor watches a close-on-exec lifetime channel held only by the host and
+kills the subprocess group when the host exits, including SIGKILL. It observes
+child exit with `waitid(WNOWAIT)`, kills the group before reaping its leader, and
+preserves the child's status. Closing the lifetime channel also cleans up a
+failed input write before the host joins pipe readers. Subprocesses that
+explicitly detach into another process group are outside this lifecycle.
+
+Linux process tests build a real Lake dependency whose Lean compiler signals
+PID readiness and blocks. They check SIGINT, SIGTERM and SIGKILL, completed and
+failed builds with background descendants, and an input-pipe error. The
+120-second startup and 30-second termination deadlines are watchdogs; fixtures
+wait for an hour so natural completion cannot satisfy the checks.
 Unsupported toolchains and unsupported compiler arguments fail rather
 than silently changing the execution conditions.
 

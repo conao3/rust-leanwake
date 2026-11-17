@@ -1,16 +1,25 @@
 use crate::error::{Error, Result};
 use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
 
-struct ChildGuard(Child);
+struct ChildGuard(Child, Option<UnixStream>);
+
+impl ChildGuard {
+    fn stop(&mut self) {
+        self.1.take();
+        let _ = self.0.wait();
+    }
+}
 
 impl Drop for ChildGuard {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.stop();
     }
 }
 
@@ -18,28 +27,46 @@ pub fn run(command: &mut Command, input: Option<&[u8]>) -> Result<Output> {
     if DEBUG.load(Ordering::Relaxed) {
         eprintln!("leanwake: {command:?}");
     }
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::process::CommandExt;
-        unsafe {
-            command.pre_exec(|| {
-                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::getppid() == 1 {
-                    libc::raise(libc::SIGKILL);
-                }
-                Ok(())
-            });
+    let helper = std::env::current_exe()?
+        .parent()
+        .ok_or_else(|| Error::internal("host has no executable directory"))?
+        .join("leanwake-supervisor");
+    let (control, lifetime) = UnixStream::pair()?;
+    let fd = control.as_raw_fd();
+    let mut supervised = Command::new(helper);
+    supervised
+        .arg("--control-fd")
+        .arg(fd.to_string())
+        .arg("--")
+        .arg(command.get_program())
+        .args(command.get_args());
+    if let Some(directory) = command.get_current_dir() {
+        supervised.current_dir(directory);
+    }
+    for (key, value) in command.get_envs() {
+        if let Some(value) = value {
+            supervised.env(key, value);
+        } else {
+            supervised.env_remove(key);
         }
     }
+    unsafe {
+        supervised.process_group(0).pre_exec(move || {
+            if libc::fcntl(fd, libc::F_SETFD, 0) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
     let mut child = ChildGuard(
-        command
+        supervised
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?,
+        Some(lifetime),
     );
+    drop(control);
     let mut stdout = child
         .0
         .stdout
@@ -68,7 +95,7 @@ pub fn run(command: &mut Command, input: Option<&[u8]>) -> Result<Output> {
             child.0.wait()
         })();
         if status.is_err() {
-            let _ = child.0.kill();
+            child.stop();
         }
         let stdout = out
             .join()

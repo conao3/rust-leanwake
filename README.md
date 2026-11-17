@@ -10,7 +10,7 @@ With [Nix](https://nixos.org/download/) and flakes enabled:
 nix run github:conao3/rust-leanwake -- help
 ```
 
-The package supplies the Rust CLI, native Lean adapter, pinned Lean/Lake toolchain, C compiler and Git. Compiler and Git paths are appended to PATH so caller-provided tools take precedence. To build a local checkout:
+The package supplies the Rust CLI, process supervisor, native Lean adapter, pinned Lean/Lake toolchain, C compiler and Git. Compiler and Git paths are appended to PATH so caller-provided tools take precedence. To build a local checkout:
 
 ```sh
 nix build
@@ -47,7 +47,7 @@ Path	Module	Commands	Heartbeats	ElapsedNs	HasErrors
 Steps.lean	Steps	12	707878	262923073	false
 ```
 
-`--output-file` writes a JSON profile and leaves standard output empty. Without it, the profile is written to standard output; `--output text|table` selects a file summary instead. An error in one source is recorded with `HasErrors`; independent files continue.
+`--output-file` writes a JSON profile and leaves standard output empty. Without it, the profile is written to standard output; `--output text|table` selects a file summary instead. An error in one source is recorded with `HasErrors`; independent files continue. A process supervisor stops each subprocess group after completion or failure and when the host exits, including SIGINT, SIGTERM and SIGKILL. Processes deliberately detached into a separate process group are outside this lifecycle.
 
 ## Compare
 
