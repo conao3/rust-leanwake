@@ -1,72 +1,297 @@
 # Leanwake
 
-Leanwake records command elaboration costs for Lean 4.35.0 Lake projects. A Rust
-host prepares dependencies and runs one native Lean adapter process per file.
-Profiles contain raw heartbeats, elapsed nanoseconds, declaration names, source
-ranges and errors. Elaboration runs synchronously; files can run in parallel.
+Leanwake records elaboration costs for commands and declarations in Lean 4.35.0 Lake projects, then compares two recordings to detect heartbeat regressions in CI. It records source ranges, declaration names, elapsed time and errors, and can include a trace tree with tactic locations. Comparison rules are defined and proved in Lean and generated into Rust with [leanfran](https://github.com/conao3/lean-leanfran).
+
+## Installation
+
+With [Nix](https://nixos.org/download/) and flakes enabled:
 
 ```sh
-nix build --option cores 4 --max-jobs 1
-result/bin/leanwake profile record-profile --project-dir ./project --jobs 4 --output-file profile.json
-result/bin/leanwake profile list-commands --profile file://profile.json --limit 10
-result/bin/leanwake profile list-files --profile file://profile.json --output table
-result/bin/leanwake profile compare-profiles --base-profile file://base.json --head-profile file://head.json
+nix run github:conao3/rust-leanwake -- help
 ```
 
-The default selection follows Lake's default targets and their transitive local
-imports. Use `--paths File.lean Directory` to select source files relative to the
-project root. Selection skips hidden entries and symbolic links, including
-explicit paths through hidden or linked directories.
-An explicit source outside a declared Lake target uses the package's Lean
-options. The project must declare `leanprover/lean4:v4.35.0` in `lean-toolchain`.
+The package supplies the Rust CLI, native Lean adapter and pinned Lean/Lake toolchain. To build a local checkout:
 
-`record-profile` writes JSON to `--output-file`, or to standard output when that
-parameter is omitted. All commands accept `--output json|text|table` (default
-`json`), `--debug`, `--no-debug` and `--version`. Each command level accepts
-`help`. Parameter values beginning with `file://` are read from that file;
-`file:///dev/stdin` reads standard input.
+```sh
+nix build
+./result/bin/leanwake help
+```
 
-Exit codes are 0 for success, 252 for invalid syntax or parameters, 254 for
-project errors (including any profile file with `HasErrors`), and 255 for host
-or protocol failures. Import preparation failures produce an errored file with
-an empty command list. Independent files continue to be measured.
+## Record and inspect
 
-Heartbeats count small allocations on the elaborating thread. `maxHeartbeats`
-uses thousands of these units; Leanwake preserves the project's limit. Command
-time excludes parsing, imports, name collection and JSON serialization. Import
-time is recorded separately. Elaboration can execute the project's metaprograms
-and `#eval` actions, just as compiling its source can.
-Synchronous elaboration does not guarantee identical raw counters for every
-Lean workload; small differences remain in the real-project measurements.
+The examples below use `tests/fixtures/steps` from this repository. Replace it with your Lake project directory.
+
+```sh
+nix run github:conao3/rust-leanwake -- profile record-profile \
+  --project-dir tests/fixtures/steps --jobs 4 --output-file base.json
+nix run github:conao3/rust-leanwake -- profile list-commands \
+  --profile file://base.json --limit 3 --output table
+```
+
+```text
+Heartbeats	ElapsedNs	Path	Key	HasErrors
+421038	46718672	Steps.lean	_aux_Steps___elabRules_tacticLocalClose_1	false
+84492	11920477	Steps.lean	simplifyMany	false
+50430	8005983	Steps.lean	heavy	false
+```
+
+By default, recording selects Lake's default target modules and their transitive imports inside the project. Use `--paths File.lean Directory` to choose files and directory trees relative to the project root. Hidden paths and symbolic links are excluded. Dependencies are prepared serially, then up to `--jobs` files are measured concurrently; the default is one worker.
+
+```sh
+nix run github:conao3/rust-leanwake -- profile list-files \
+  --profile file://base.json --output table
+```
+
+```text
+Path	Module	Commands	Heartbeats	ElapsedNs	HasErrors
+Steps.lean	Steps	12	707878	262923073	false
+```
+
+`--output-file` writes a JSON profile and leaves standard output empty. Without it, the profile is written to standard output; `--output text|table` selects a file summary instead. An error in one source is recorded with `HasErrors`; independent files continue.
+
+## Compare
+
+Record the same source as `head.json`, then compare:
+
+```sh
+nix run github:conao3/rust-leanwake -- profile record-profile \
+  --project-dir tests/fixtures/steps --output-file head.json
+nix run github:conao3/rust-leanwake -- profile compare-profiles \
+  --base-profile file://base.json --head-profile file://head.json --output table
+```
+
+```text
+Regressed: 0  Improved: 0  Unchanged: 12  Added: 0  Removed: 0
+Heartbeats: 707878 -> 707878; thresholds: > 1000 heartbeats and > 1%
+Status	BaseHeartbeats	HeadHeartbeats	DeltaHeartbeats	Path	Key
+```
+
+Changing the fixture's `heavy` theorem from `(List.range 100).length = 100` to `(List.range 300).length = 300` and recording again produces the following comparison, with exit code 254:
+
+```text
+Regressed: 1  Improved: 0  Unchanged: 11  Added: 0  Removed: 0
+Heartbeats: 707878 -> 785078; thresholds: > 1000 heartbeats and > 1%
+Status	BaseHeartbeats	HeadHeartbeats	DeltaHeartbeats	Path	Key
+regressed	50430	127631	77201	Steps.lean	heavy
+```
+
+Commands are matched by `(Path, Key)` and classified as `regressed`, `improved`, `unchanged`, `added` or `removed`. A regression must satisfy both strict inequalities:
+
+```text
+head - base > absolute-threshold-heartbeats
+(head - base) * 100 > base * relative-threshold-percent
+```
+
+Defaults are **1,000 heartbeats and 1%**. Improvement uses the same rule with base and head exchanged. Thresholds are nonnegative 64-bit integers; intermediate products and totals use arbitrary precision natural numbers. Equality at either threshold is unchanged. Added or removed commands alone do not fail CI.
+
+JSON output contains `Summary`, `Thresholds` and `Commands`. Unchanged rows are omitted; regressions come first, sorted by descending heartbeat increase. Missing counts are null, with zero used for their delta. The displayed range comes from head, or base for removals. Differing schema versions, toolchains or conditions, errored profiles and duplicate `(Path, Key)` identities are rejected before comparison results are emitted. Detail steps comparisons use command totals, not sums of trace nodes.
+
+## Inspect steps
+
+```sh
+nix run github:conao3/rust-leanwake -- profile record-profile \
+  --project-dir tests/fixtures/steps --detail steps --output-file steps.json
+nix run github:conao3/rust-leanwake -- profile list-steps \
+  --profile file://steps.json --path Steps.lean --key repeated --limit 12 --output table
+```
+
+```text
+Heartbeats	Depth	Range	Class	Kind
+49227	0	3:0-6:28	Elab.command	-
+31388	1	-	Elab.definition.header	-
+30070	2	-	Elab.step	-
+29930	3	-	Elab.step	-
+29596	4	-	Elab.app.args	-
+18245	5	-	Elab.step	-
+18144	6	-	Elab.step	-
+18025	7	-	Elab.step	-
+14789	1	-	Elab.definition.value	-
+14001	2	-	Elab.step	-
+13921	3	4:2-6:28	Leanwake.tactic	Lean.Parser.Tactic.tacticSeq
+13870	4	-	Elab.step	-
+```
+
+Each command's `Steps` is a trace forest. Nodes contain `Class`, `Heartbeats`, `Range` and `Children`; tactic nodes also contain `Kind`, the Lean syntax kind. `Leanwake.tactic` nodes preserve syntax positions by wrapping tactic elaborators, including newly registered elaborators in the measured file. Two occurrences of the same tactic on different lines remain distinct. Macro expansion may produce several nested nodes at the same source range. Nodes without retained source syntax have a null range.
+
+`--step-threshold-heartbeats N` keeps nodes with at least N heartbeats; the default is **1,000**. Retained children of omitted nodes are promoted to the nearest retained ancestor. Capture always uses `trace.profiler.useHeartbeats=true` with a zero capture threshold; filtering happens after measurement, so changing the output threshold does not change the measured command cost. `Depth` in `list-steps` is the depth of the retained tree, with roots at zero. Equal-cost nodes retain traversal order.
+
+Trace costs include their children. Adding all nodes double-counts nested work; use the command's `Heartbeats` for comparison. Trace collection adds elaboration work, so `Detail=none` and `Detail=steps` recordings cannot be compared. `list-steps` returns 254 for detail none or an unknown path/key.
+
+For all 61 files and 967 commands in lean-ritsuryo, the development host and native adapter on four CPUs recorded these sizes and times (decimal MB):
+
+| Detail / retained threshold | JSON size | Recording time |
+| --- | ---: | ---: |
+| none | 0.52 MB | 64.3 s |
+| steps / 0 | 6,907.92 MB | 189.3 s |
+| steps / 1,000 | 385.84 MB | 92.6–117.5 s |
+| steps / 10,000 | 47.05 MB | 94.3 s |
+
+Every recording had zero errored files and commands. The 1,000 default reduces the unfiltered JSON size by 94.4% and keeps 6,164 distinct tactic position/kind pairs; 10,000 keeps 4,632. It also keeps both small `simp` calls in the example. These elapsed times include concurrent machine load and are observations, not performance guarantees.
+
+## CI for a Lean project
+
+This pull request job records the exact base and head revisions with the same Leanwake installation. Both revisions must use Lean 4.35.0. Pin the Leanwake flake to a chosen revision when maintaining long-lived baselines.
+
+```yaml
+name: Elaboration costs
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: head
+      - uses: cachix/install-nix-action@v31.11.5
+      - run: nix build github:conao3/rust-leanwake --out-link leanwake
+      - run: ./leanwake/bin/leanwake profile record-profile --project-dir base --jobs 2 --output-file base.json
+      - run: ./leanwake/bin/leanwake profile record-profile --project-dir head --jobs 2 --output-file head.json
+      - run: ./leanwake/bin/leanwake profile compare-profiles --base-profile file://base.json --head-profile file://head.json --output table
+```
+
+Generate an [Actions lockfile](https://github.com/github/gh-actions-lock) for the workflow to pin its action tags to commits. The CLI returns 254 if a regression is found, causing the comparison step to fail.
+
+## Measurement and reproducibility
+
+The native adapter imports a file's dependencies, parses each top-level command, and measures `elabCommandAtFrontend` between calls to `IO.getNumHeartbeats` and `IO.monoNanosNow`. Elaboration runs synchronously with `Elab.async=false`, including source-level `set_option` overrides. Each source file has its own adapter process. Command time excludes parsing, imports, name discovery, hashing and JSON serialization; import time is recorded separately.
+
+Heartbeats count small allocations on the elaborating thread. They are neither elapsed time nor allocated bytes. One unit of Lean's `maxHeartbeats` corresponds to **1,000 raw heartbeats** in a profile. Project heartbeat limits remain in effect. Recording executes elaborators and `#eval` actions as compilation does.
+
+`Names` lists newly introduced constants with declaration ranges, ordered by range start and then name. `Key` is the first name when present. Otherwise it is:
+
+```text
+<Path>::<last component of Kind>:<first 12 hex digits of source SHA-256>#<occurrence>
+```
+
+The hash covers the command syntax's UTF-8 source, excluding surrounding trivia. Occurrences are one-based within a file for identical kind and source. Paths are relative to the project root. Lines are one-based, columns zero-based, and end positions are exclusive.
+
+Repeated recordings of unchanged real projects on four cores produced:
+
+| Project / selection | Files | Commands | Maximum command heartbeat difference | Recording time | Lake build |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| lean-ritsuryo / default | 54 | 893 | 8 | 43.1–43.5 s | 48.4 s |
+| lean-ritsuryo / all | 61 | 967 | 15 | 45.8–61.7 s | 78.1 s |
+| lean-assay / default | 8 | 133 | 0 | 14.1–17.7 s | 23.0 s |
+| lean-assay / all | 30 | 253 | 137 | 199.4–248.2 s | 147.5 s |
+
+All files had `HasErrors=false`. Small remaining differences are preserved, rather than rounded away. The deterministic integration fixture matches exactly; this is not a guarantee for arbitrary Lean metaprograms. Lean's lazy realization and kernel replay use additional internal mechanisms beyond the top-level async switch, and the precise source of the remaining variation is not isolated. The default absolute threshold of 1,000 exceeds the largest observed difference of 137, while the relative threshold also requires a change above 1%.
+
+## Verified rules
+
+The source is [`src/rules.rs`](src/rules.rs). `leanfran` extracts it into `lean/`, checks proofs and generates the committed Rust in `.leanfran/cache/`. The CLI calls that generated implementation for matching, classification, aggregation and failure.
+
+| Theorems | Property |
+| --- | --- |
+| `grows_lt`, `grows_asymmetric` | Growth implies an increase and cannot hold in both directions. |
+| `classify_regressed`, `classify_improved` | Classification agrees with the growth predicate. |
+| `equal_unchanged` | Equal counts are unchanged. |
+| `swap_classification` | Swapping inputs swaps regression and improvement. |
+| `regression_monotone` | Increasing head preserves regression. |
+| `grows_thresholds`, `regression_thresholds`, `improvement_thresholds` | Raising thresholds cannot introduce growth, regression or improvement. |
+| `takeMatch_conservation` | Taking a match preserves all head entries. |
+| `matching_base_once`, `matching_head_once` | Every input occurrence appears exactly once in the result. |
+| `summary_regressed` | The regression total equals the number of regressed rows. |
+| `failure_iff_regression` | Failure holds exactly when a regression exists. |
+
+`make check` audits theorem axioms, accepting only Lean's standard `propext`, `Classical.choice` and `Quot.sound`; regenerates Rust and checks byte-for-byte agreement; and verifies that a deliberately wrong classification fails proof checking. Proofs cover the comparison definitions, while integration tests exercise file selection, native measurement and the host boundary.
+
+## Profile format
+
+The JSON schema remains version 1. This is an excerpt from an actual recording, with other commands omitted:
+
+```json
+{
+  "SchemaVersion": 1,
+  "Tool": {
+    "Name": "leanwake",
+    "Version": "0.1.0"
+  },
+  "Toolchain": "Lean (version 4.35.0, Release)",
+  "Conditions": {
+    "Async": false,
+    "Detail": "none"
+  },
+  "Files": [
+    {
+      "Path": "Steps.lean",
+      "Module": "Steps",
+      "SourceSha256": "64745bd140e3e359c7aeba6625d8f32e12e7a54fca6739292033d19576c44f19",
+      "HasErrors": false,
+      "ImportElapsedNs": 806632810,
+      "Commands": [
+        {
+          "Key": "heavy",
+          "Kind": "Lean.Parser.Command.declaration",
+          "Names": [
+            "heavy"
+          ],
+          "Range": {
+            "Start": {
+              "Line": 8,
+              "Column": 0
+            },
+            "End": {
+              "Line": 9,
+              "Column": 16
+            }
+          },
+          "Heartbeats": 50430,
+          "ElapsedNs": 8005983,
+          "HasErrors": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+With `Detail=steps`, every command additionally has `Steps: [...]`; with `Detail=none`, that field is absent. Unknown fields, unsupported schema versions and inconsistent detail/step fields are rejected. All CLI JSON field names use PascalCase. File-valued parameters use `file://path`, and `file:///dev/stdin` reads standard input. Every command accepts `--output json|text|table`, `--debug`, `--no-debug`, `--version` and `help` at each command level.
+
+## Exit codes
+
+| Code | Meaning |
+| ---: | --- |
+| 0 | Successful recording/listing, or a comparison without regressions. |
+| 252 | Invalid command syntax or parameter, including malformed input JSON. |
+| 254 | Project/source error, incompatible or invalid profile, unknown step selection, or detected regression. |
+| 255 | Host I/O failure, missing runtime configuration, or invalid adapter protocol. |
+
+## Limitations
+
+- The project must declare `leanprover/lean4:v4.35.0`. Different toolchain recordings cannot be compared.
+- Lake's module setup, options, plugins and `-Dname=value` arguments are supported. Other `weakLeanArgs` or `moreLeanArgs` are rejected explicitly.
+- Measurements are top-level command costs. A command introducing multiple declarations has one cost and a list of names; it is not split into individual kernel declarations.
+- Trace locations depend on retained syntax. Generated tactic syntax can share its macro call's range, and many internal trace classes have no position.
+- Very detailed recordings can require substantial memory and disk space. The output threshold reduces retained JSON, but all trace capture still runs.
+- Elapsed time is informational. Git checkout orchestration, time-based regression gates, graphs, cross-toolchain comparison and Mathlib-scale profiling are outside this release's validated scope.
+- Linux is exercised in the integration tests. The flake defines an Apple Silicon package, but macOS execution has not been validated.
+
+## Related tools
+
+- [Lean `trace.profiler`](https://github.com/leanprover/lean4/blob/v4.35.0/src/Lean/Util/Trace.lean): built-in nested tracing with time or heartbeat measurements.
+- [lakeprof](https://github.com/Kha/lakeprof): Lake build job timing and critical-path analysis.
+- [Radar](https://github.com/leanprover/radar): performance measurements across Lean revisions.
+- [leanprof](https://github.com/unbalancedparentheses/leanprof): runtime and elaboration profiling with source attribution and CI comparisons.
+- [lean-source-profiler](https://github.com/Vilin97/lean-source-profiler): source-level timing logs, VS Code overlays and a repository viewer.
 
 ## Development
 
 ```sh
 nix develop --command make check
-nix build --option cores 4 --max-jobs 1
+nix build
+git config core.hooksPath .githooks
 ```
 
-`make check` builds the native adapter and Rust host, checks formatting and
-Clippy, and runs integration tests. The dev shell sets `LEAN_SYSROOT` and
-`LEANWAKE_ADAPTER`; the distribution supplies both through wrappers. `native/`
-contains the profiler and Lake configuration reader, and `src/` contains the
-CLI, process management, recording and listing code.
+`make check` builds both components, checks formatting and Clippy, checks the Lean proofs and generated Rust, and runs executable integration tests. `nix build` builds the packaged CLI and adapters with `LEANFRAN_OFFLINE=1` and runs integration tests inside the Nix sandbox. The pre-commit hook and GitHub Actions use `make check`. See [`AGENTS.md`](AGENTS.md) for component responsibilities and regeneration commands.
 
-`compare-profiles` matches `(Path, Key)` pairs. A regression exceeds both the
-absolute threshold (default 1,000 heartbeats) and the relative threshold (default
-1% of base). Improvement applies the same rule with base and head exchanged.
-Set `--absolute-threshold-heartbeats N` and `--relative-threshold-percent N` to
-change these strict thresholds. Both accept nonnegative 64-bit integers.
+## License
 
-Comparison returns 254 when any command regresses, otherwise 0. Different schema
-versions, toolchains or conditions, errored records, and duplicate identities also
-return 254 with diagnostics. JSON includes `Summary`, `Thresholds` and changed
-`Commands`; regressions come first in descending delta order. Added and removed
-commands have null for the missing count and use zero for that side of the delta.
-`Range` refers to head, or base for removals. Text and table output include totals
-and a command table.
-
-Classification, matching, aggregation and failure are defined and proved in Lean,
-then generated into Rust with leanfran. `make check` checks the proofs, the generated
-cache and a deliberately incorrect comparison definition, in addition to CLI tests.
-This release records `Conditions.Detail = "none"`.
+[Apache-2.0](LICENSE).
