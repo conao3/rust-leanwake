@@ -1,4 +1,5 @@
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 pub fn value(input: &str) -> Result<String, String> {
@@ -145,4 +146,51 @@ pub struct Compare {
     pub relative_threshold_percent: u64,
     #[arg(long, default_value = "1000", value_parser = natural)]
     pub absolute_threshold_heartbeats: u64,
+}
+
+pub fn normalize_help(args: &mut [OsString]) {
+    let mut command = Cli::command();
+    command.build();
+    let mut current = &command;
+    let mut remaining = 0usize;
+    let mut required = 0usize;
+    for arg in args.iter_mut().skip(1) {
+        let Some(text) = arg.to_str() else {
+            remaining = remaining.saturating_sub(1);
+            required = required.saturating_sub(1);
+            continue;
+        };
+        if text == "--" {
+            return;
+        }
+        if let Some(option) = text.strip_prefix("--") {
+            if required > 0 {
+                return;
+            }
+            let (name, inline) = option
+                .split_once('=')
+                .map_or((option, false), |(name, _)| (name, true));
+            let Some(parameter) = current
+                .get_arguments()
+                .find(|parameter| parameter.get_long() == Some(name))
+            else {
+                return;
+            };
+            let values = parameter.get_num_args().unwrap_or_default();
+            remaining = values.max_values().saturating_sub(usize::from(inline));
+            required = values.min_values().saturating_sub(usize::from(inline));
+        } else if text.starts_with('-') {
+            return;
+        } else if remaining > 0 {
+            remaining -= 1;
+            required = required.saturating_sub(1);
+        } else if text == "help" {
+            *arg = "--help".into();
+            return;
+        } else if let Some(subcommand) = current.find_subcommand(text) {
+            current = subcommand;
+        } else {
+            return;
+        }
+    }
 }

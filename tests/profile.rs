@@ -1461,3 +1461,57 @@ fn default_selection_excludes_symlink_files_and_ancestors() {
         assert!(String::from_utf8_lossy(&output.stderr).contains("no Lean source files selected"));
     }
 }
+
+#[test]
+fn help_accepts_global_options_without_changing_parameter_values() {
+    for path in [
+        vec![],
+        vec!["profile"],
+        vec!["profile", "record-profile"],
+        vec!["profile", "compare-profiles"],
+        vec!["profile", "list-files"],
+        vec!["profile", "list-commands"],
+        vec!["profile", "list-steps"],
+    ] {
+        for globals in [
+            vec!["--debug"],
+            vec!["--no-debug"],
+            vec!["--output", "text"],
+            vec!["--output=json"],
+        ] {
+            for position in 0..=path.len() + 1 {
+                let mut args = path.clone();
+                args.push("help");
+                args.splice(position..position, globals.clone());
+                let output = cli(&args);
+                assert_code(&output, 0);
+                assert!(String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+            }
+        }
+    }
+    let profile = synthetic_profile(&[("help", "help", 1)]);
+    let output = cli(&["profile", "list-files", "--profile", &profile.to_string()]);
+    assert_code(&output, 0);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("help"));
+    for parameter in ["--profile", "--profile=help"] {
+        let mut args = vec!["profile", "list-files", parameter];
+        if parameter == "--profile" {
+            args.push("help");
+        }
+        let output = cli(&args);
+        assert_code(&output, 252);
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+    }
+    let root = fixture("async");
+    let output = cli(&[
+        "profile",
+        "record-profile",
+        "--project-dir",
+        root.to_str().unwrap(),
+        "--paths",
+        "help",
+    ]);
+    assert_code(&output, 252);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("help"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Usage:"));
+}

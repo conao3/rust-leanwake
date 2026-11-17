@@ -8,7 +8,7 @@ mod project;
 mod rules;
 mod steps;
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use cli::{Cli, Command, Output, ProfileCommand};
 use error::{Error, Result};
 use model::Profile;
@@ -176,17 +176,7 @@ fn run(cli: Cli) -> Result<u8> {
 
 fn main() -> std::process::ExitCode {
     let mut args: Vec<_> = std::env::args_os().collect();
-    if args.last().is_some_and(|arg| arg == "help") {
-        let command = Cli::command();
-        let mut current = Some(&command);
-        for arg in &args[1..args.len() - 1] {
-            current =
-                current.and_then(|cmd| arg.to_str().and_then(|name| cmd.find_subcommand(name)));
-        }
-        if current.is_some() {
-            *args.last_mut().unwrap() = "--help".into();
-        }
-    }
+    cli::normalize_help(&mut args);
     let cli = match Cli::try_parse_from(args) {
         Ok(cli) => cli,
         Err(error) => {

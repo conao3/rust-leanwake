@@ -258,7 +258,7 @@ The JSON schema remains version 1. This is an excerpt from an actual recording, 
 }
 ```
 
-With `Detail=steps`, every command additionally has `Steps: [...]`; with `Detail=none`, that field is absent. Unknown fields, unsupported schema versions and inconsistent detail/step fields are rejected. All CLI JSON field names use PascalCase. File-valued parameters use `file://path`, and `file:///dev/stdin` reads standard input. Every command accepts `--output json|text|table`, `--debug`, `--no-debug`, `--version` and `help` at each command level.
+With `Detail=steps`, every command additionally has `Steps: [...]`; with `Detail=none`, that field is absent. Unknown fields, unsupported schema versions and inconsistent detail/step fields are rejected. All CLI JSON field names use PascalCase. File-valued parameters use `file://path`, and `file:///dev/stdin` reads standard input. Every command accepts `--output json|text|table`, `--debug`, `--no-debug`, `--version` and `help` at each command level. Global options can appear before or after the command names and `help`; an option value equal to `help` remains a value.
 
 ## Exit codes
 
