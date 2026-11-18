@@ -78,7 +78,7 @@ The default is `--limit 10`. JSON, the default output, carries the full data wit
 }
 ```
 
-`list-hotspots` measures in two passes. The first pass elaborates every selected file without tracing; ranking, seconds and shares come only from it. Tracing makes elaboration several times slower and changes the order: when the file containing lean-ritsuryo's slowest theorem was recorded alternately, the theorem took 9.3–9.4 s without tracing, 29.3–29.6 s with every trace node captured and 18.1–18.6 s with a 1 ms capture threshold. Heartbeat order differs from time order (a `decide +kernel` theorem is second by time and fifth by heartbeats). The second pass elaborates again only the files that contain listed declarations, stops after the last listed command of each file, and enables the trace profiler only for the listed commands, in time mode with a 1 ms capture threshold; tactic nodes are always kept. With the same commit of lean-ritsuryo (54 files, 893 commands, `--jobs 4`), the first pass alone (`--detail none`) took 47.5 s of wall-clock time and the whole command 72.8–85.3 s. These are observations on a shared machine, not guarantees.
+`list-hotspots` measures in two passes. The first pass elaborates every selected file without tracing; ranking, seconds and shares come only from it. Tracing makes elaboration several times slower and changes the order: when the file containing lean-ritsuryo's slowest theorem was recorded alternately, the theorem took 9.3–9.4 s without tracing, 29.3–29.6 s with every trace node captured and 18.1–18.6 s with a 1 ms capture threshold. Heartbeat order differs from time order (a `decide +kernel` theorem is second by time and fifth by heartbeats). The second pass elaborates again only the files that contain listed declarations, stops after the last listed command of each file, and enables the trace profiler only for the listed commands, in time mode with a 1 ms capture threshold; tactic nodes are always kept. For one commit of lean-ritsuryo (54 files, 893 commands, `--jobs 4`), three pairs of runs took 40.5 s, 47.5 s and 47.6 s of wall-clock time for the first pass alone (`--detail none`) and 99.7 s, 72.8 s and 85.3 s for the whole command, an extra 53% to 146%. These are observations on a shared machine, not guarantees.
 
 Options:
 
@@ -362,7 +362,7 @@ With `Detail=steps`, every command additionally has `Steps: [...]`, whose nodes 
 - [lakeprof](https://github.com/Kha/lakeprof): Lake build job timing and critical-path analysis.
 - [Radar](https://github.com/leanprover/radar): performance measurements across Lean revisions.
 
-lean-source-profiler and leanprof also measure declaration and tactic time. Leanwake takes its ranking and seconds from an untraced measurement and traces only the declarations it lists, so the ranking is not distorted by tracing cost. Its comparison rules are proved in Lean, and its recordings carry their measurement conditions (toolchain, synchronous elaboration, detail), so comparing recordings made under different conditions fails instead of producing results.
+lean-source-profiler and leanprof also measure declaration and tactic time. Leanwake takes its ranking and seconds from an untraced measurement and traces only the declarations it lists. Its comparison rules are proved in Lean, and its recordings carry their measurement conditions (toolchain, synchronous elaboration, detail), so comparing recordings made under different conditions fails instead of producing results.
 
 ## Development
 
