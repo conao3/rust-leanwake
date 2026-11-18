@@ -1,5 +1,5 @@
 {
-  description = "Leanwake: command elaboration profiles for Lake projects";
+  description = "Leanwake: find the slowest proofs in Lake projects";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     leanfran.url = "github:conao3/lean-leanfran/1bb464c6d419da8037698053f52dd23476a042d9";
@@ -33,7 +33,7 @@
             pkgs.lean4;
           adapter = pkgs.stdenv.mkDerivation {
             pname = "leanwake-adapter";
-            version = "0.1.0";
+            version = "0.2.0";
             src = ./native;
             nativeBuildInputs = [
               lean
@@ -52,7 +52,7 @@
           packages.adapter = adapter;
           packages.default = pkgs.rustPlatform.buildRustPackage {
             pname = "leanwake";
-            version = "0.1.0";
+            version = "0.2.0";
             src = ./.;
             cargoLock.lockFile = ./Cargo.lock;
             nativeBuildInputs = [ pkgs.makeWrapper ];
@@ -78,6 +78,7 @@
               python3 tools/check-package.py "$out/bin/leanwake"
             '';
             meta = {
+              description = "Find the slowest proofs in Lean 4.35.0 Lake projects and compare elaboration profiles";
               mainProgram = "leanwake";
               license = pkgs.lib.licenses.asl20;
             };

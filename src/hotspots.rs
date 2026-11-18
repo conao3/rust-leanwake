@@ -251,6 +251,14 @@ fn seconds(ns: u64) -> String {
     format!("{:.2}", ns as f64 / 1e9)
 }
 
+fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
 fn describe(entry: &Inside) -> String {
     match (&entry.kind, &entry.range) {
         (Some(kind), Some(range)) => format!(
@@ -279,10 +287,10 @@ fn emit(listing: &Listing, output: Output) -> Result<()> {
     if matches!(output, Output::Table) {
         writeln!(
             stdout,
-            "{} s in {} commands and {} files; the {} listed take {}",
+            "{} s in {} and {}; the {} listed take {}",
             seconds(listing.elapsed_ns),
-            listing.commands,
-            listing.files,
+            count(listing.commands, "command"),
+            count(listing.files, "file"),
             listing.hotspots.len(),
             percent(listing.listed_share)
         )?;

@@ -26,8 +26,9 @@ for Cargo and GitHub Actions.
 - `src/project.rs`: Lake discovery, setup, selection and bounded file workers.
 - `src/process.rs`: child pipes and supervisor lifetime channels.
 - `src/bin/leanwake-supervisor.rs`: process groups, host-death detection and descendant cleanup.
-- `src/model.rs`: the PascalCase schema, version 1.
+- `src/model.rs`: the PascalCase schema, version 2, with the version checked before decoding.
 - `src/json_io.rs`: stack-growing JSON decoding and serialization for deep traces.
+- `src/hotspots.rs`: the untraced ranking, the traced pass for listed declarations, the tactic breakdown and its output.
 - `src/main.rs`: exit codes, command and file listings, and output formats.
 - `src/steps.rs`: command selection, trace flattening, sorting and step output.
 - `src/compare.rs`: profile validation, grouping by path, metadata lookup, sorting and output.
@@ -38,7 +39,7 @@ for Cargo and GitHub Actions.
 - `tools/check-format.py`: tracked-file formatting with isolated Git configuration.
 - `tools/check-package.py`: installed wrapper, plugin compiler, local Git dependency and PATH priority.
 - `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
-- `native/Main.lean`: synchronous elaboration, ranges, names and measurements.
+- `native/Main.lean`: synchronous elaboration, per-command tracing, ranges, names and measurements.
 - `native/Sha256.lean`: SHA-256 for source identity and unnamed command keys.
 - `tests/profile.rs` and `tests/fixtures/`: executable acceptance tests.
 
@@ -104,12 +105,27 @@ does; terminal linter errors contribute to the file's `HasErrors`. Read the raw
 thread heartbeat counter and monotonic nanosecond clock immediately around
 elaboration. Name collection, sorting, hashing, diagnostics and serialization
 are outside the measurement interval. Preserve all project limits and options
-except `Elab.async`, which is forced to false. In steps mode, also force heartbeat
-profiling with a zero capture threshold and retained trace state. Apply the
-requested step threshold only when exporting the tree, outside measurement.
-Keep nodes with at least that many heartbeats, promoting retained children of
-omitted nodes. This keeps command and trace measurements independent of the
-output threshold.
+except `Elab.async`, which is forced to false. In steps mode, also force the trace
+profiler in time mode (`trace.profiler.useHeartbeats=false`, so node start and stop
+times come from `IO.monoNanosNow`), enable `trace.Leanwake.tactic`, and retain the
+trace state. `record-profile` captures with a zero threshold. Apply the requested
+step threshold in nanoseconds only when exporting the tree, outside measurement.
+Keep nodes of at least that many nanoseconds and every `Leanwake.tactic` node,
+promoting retained children of omitted nodes. This keeps command and trace
+measurements independent of the output threshold.
+
+`list-hotspots` ranks commands by `ElapsedNs` from a detail none measurement and
+never from traced times. For the breakdown it sends the adapter the start positions
+of the listed commands in each file containing them. The adapter traces only those
+commands with a 1 ms capture threshold, sets `trace.profiler` and
+`trace.Leanwake.tactic` to false for the other commands, emits rows only for the
+traced commands and stops after the last one. A per-command mode stored in an
+`IO.Ref` is read by the command elaborator wrappers, so nested scopes get the same
+options. The host matches traced rows by path and start position, rejects a
+different `Key`, and groups the innermost tactic nodes with a range by kind and
+range. In a chain of nodes with one range it reports the outermost kind that is not
+a tactic sequence. Without tactic nodes it reports the self time of trace classes.
+Shares inside a declaration are relative to its traced `ElapsedNs`.
 
 Wrap every command elaborator entry, restoring measurement options before and
 after each handler. Refresh wrappers before each top-level command; a scoped
@@ -274,10 +290,11 @@ source and both generated directories, plus the audit manifest and toolchain.
 `nix build` sets `LEANFRAN_OFFLINE=1` and builds from the committed cache inside the
 network-isolated Nix build. A missing cache is an error.
 
-Comparison validation checks `SchemaVersion`, `Toolchain` and `Conditions` before
-classification and prints both values for every differing field. Reject errored
+Every profile reader rejects a `SchemaVersion` other than 2 before decoding the rest,
+asking to record again. Comparison validation checks `Toolchain` and `Conditions`
+before classification and prints both values for every differing field. Reject errored
 files, errored commands and duplicate pairs on either side. The supported profile
-schema and conditions are version 1, synchronous elaboration, and detail `none`
+schema and conditions are version 2, synchronous elaboration, and detail `none`
 or `steps`. Every command in a steps profile must have `Steps`; commands in a
 none profile must omit it. Comparing different details fails before classification.
 Missing sides of added or removed commands are JSON null; their delta uses zero
@@ -290,7 +307,20 @@ status, descending delta, path and key for deterministic output.
 The steps fixture contains identical `simp` tactics on separate lines, a locally
 registered tactic, nested and persistent profiler option overrides, instance
 resolution and conditional simplification. Check exact ranges, positive counts,
-complete repeated trace equality, threshold-independent command counts, omitted
+repeated trace structure (class, kind and range), positive node times,
+threshold-independent command counts, retained tactic nodes at any threshold, omitted
 `Steps` for detail none, and comparison using command counts for detail steps.
 `list-steps` must reject unavailable commands, detail none and inconsistent
-records, and report descending counts with tree depths in every output format.
+records, and report descending elapsed times with tree depths in every output format.
+
+## Hotspot acceptance tests
+
+The hotspots fixture has one theorem whose time is dominated by `decide +kernel`
+at a known range, a term-mode proof and several fast declarations in three files.
+`list-hotspots` must rank that theorem first with its path, line and name, report
+the `decide` range as the first inside entry, report trace classes for the
+term-mode proof, keep the total equal to the sum of command times and keep listed
+and inside times at or below their totals. Rankings from `--profile` must equal the
+recording sorted by elapsed time, path and key. Tests check 252 for both or neither
+input, `--profile` with `--detail steps`, `--jobs` or `--paths`, 254 for steps and
+version 1 profiles and for files with errors, and assert no absolute times.

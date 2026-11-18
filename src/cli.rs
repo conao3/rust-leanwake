@@ -67,7 +67,7 @@ pub enum Output {
 #[command(
     version,
     propagate_version = true,
-    about = "Record Lean 4.35.0 command elaboration costs"
+    about = "Find the slowest proofs in Lean 4.35.0 Lake projects"
 )]
 pub struct Cli {
     #[arg(long, global = true, default_value = "json", value_parser = output)]
@@ -82,7 +82,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    #[command(about = "Record and inspect elaboration profiles")]
+    #[command(about = "Find slow declarations, record and compare elaboration profiles")]
     Profile {
         #[command(subcommand)]
         command: ProfileCommand,

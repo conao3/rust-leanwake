@@ -1,10 +1,10 @@
 [package]
 name = "leanwake"
 default-run = "leanwake"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "Command elaboration profiles for Lake projects"
+description = "Find the slowest proofs in Lean 4.35.0 Lake projects and compare elaboration profiles"
 repository = "https://github.com/conao3/rust-leanwake"
 
 [dependencies]

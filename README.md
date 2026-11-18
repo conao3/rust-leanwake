@@ -1,6 +1,6 @@
 # Leanwake
 
-Leanwake records elaboration costs for commands and declarations in Lean 4.35.0 Lake projects, then compares two recordings to detect heartbeat regressions in CI. It records source ranges, declaration names, elapsed time and errors, and can include a trace tree with tactic locations. Comparison rules are defined and proved in Lean and generated into Rust with [leanfran](https://github.com/conao3/lean-leanfran).
+Leanwake tells you, with one command, which proofs in a Lean 4.35.0 Lake project take the most time and which tactic inside each of them uses that time. It ranks declarations by elaboration time measured without tracing, then elaborates only the listed declarations again under Lean's trace profiler to break their time down by tactic. The same recordings can be saved and compared to detect heartbeat regressions in CI; the comparison rules are defined and proved in Lean and generated into Rust with [leanfran](https://github.com/conao3/lean-leanfran).
 
 ## Installation
 
@@ -17,25 +17,106 @@ nix build
 ./result/bin/leanwake help
 ```
 
+## Find slow proofs
+
+Run `list-hotspots` in a Lake project. The example uses `tests/fixtures/hotspots` from this repository, where `slow` checks `(List.range 8000).length = 8000` with `decide +kernel`:
+
+```sh
+nix run github:conao3/rust-leanwake -- profile list-hotspots \
+  --project-dir tests/fixtures/hotspots --jobs 4 --output table
+```
+
+```text
+0.79 s in 6 commands and 3 files; the 6 listed take 100.0%
+Seconds  Share  Location  Declaration  Heartbeats  Inside
+0.66  83.1%  Hot/Slow.lean:4  slow  3132843  decide 6:4-6:18 x1 98.5%
+0.06  7.2%  Hot/Slow.lean:1  small  18007  simp 2:2-2:6 x1 2.3%
+0.05  6.9%  Hot/Quick.lean:1  double  18804  addDecl x1 80.2%
+0.01  1.8%  Hot/Slow.lean:9  termMode  85105  Meta.whnf x161 41.5%
+0.00  0.5%  Hot/Quick.lean:5  add_zero'  17293  simp 6:2-6:6 x1 23.1%
+0.00  0.4%  Hot/Quick.lean:3  double_zero  8408  Elab.command x1 44.3%
+```
+
+The first line gives the total elaboration time of all measured commands, the numbers of commands and files, and the share of the total taken by the listed rows. Each row is one top-level command in descending elapsed time: seconds, share of the total, file and start line, declaration name (the first of `Names`, or the command kind for commands that introduce no named declaration), raw heartbeats, and the largest entry of the breakdown. `decide 6:4-6:18 x1 98.5%` means that the `decide` tactic at line 6, columns 4 to 18, ran once and took 98.5% of the declaration's traced time. Lines are one-based, columns zero-based, and end positions exclusive.
+
+The breakdown groups the innermost tactic nodes that carry a source range by tactic kind and range, and sums their time; `x4` means the tactic node at that position ran four times, for example under `<;>` or `all_goals`. When a chain of nodes shares one range, the row names the outermost tactic that is not a tactic sequence. A declaration without tactic nodes, such as a term-mode proof or a definition, shows the trace classes with the most self time (node time minus the time of its retained children) instead, like `Meta.whnf` and `addDecl` above. Breakdown shares are relative to the declaration's time in the traced pass and never add up to more than 100%; the remainder is spent outside the listed tactics, for example in the kernel check of the finished proof.
+
+The default is `--limit 10`. JSON, the default output, carries the full data with PascalCase keys: `ElapsedNs`, `Commands`, `Files`, `FilesWithErrors`, `ListedElapsedNs`, `ListedShare` and `Hotspots`. Each hotspot has `Path`, `Module`, `Key`, `Name`, `Kind`, `Range`, `ElapsedNs`, `Share`, `Heartbeats` and `HasErrors`, and with the breakdown a `Traced` object with the traced `ElapsedNs`, `HasErrors` and every `Inside` entry (`Class`, `Kind`, `Range`, `Count`, `ElapsedNs`, `Share`). This excerpt is the hotspot of `--limit 1` on the same fixture, with the other two `Inside` entries omitted:
+
+```json
+{
+  "Path": "Hot/Slow.lean",
+  "Module": "Hot.Slow",
+  "Key": "slow",
+  "Name": "slow",
+  "Kind": "Lean.Parser.Command.declaration",
+  "Range": {
+    "Start": { "Line": 4, "Column": 0 },
+    "End": { "Line": 7, "Column": 8 }
+  },
+  "ElapsedNs": 650165304,
+  "Share": 0.8829720873961836,
+  "Heartbeats": 3132843,
+  "HasErrors": false,
+  "Traced": {
+    "ElapsedNs": 558910421,
+    "HasErrors": false,
+    "Inside": [
+      {
+        "Class": "Leanwake.tactic",
+        "Kind": "Lean.Parser.Tactic.decide",
+        "Range": {
+          "Start": { "Line": 6, "Column": 4 },
+          "End": { "Line": 6, "Column": 18 }
+        },
+        "Count": 1,
+        "ElapsedNs": 552499982,
+        "Share": 0.9885304715046636
+      }
+    ]
+  }
+}
+```
+
+`list-hotspots` measures in two passes. The first pass elaborates every selected file without tracing; ranking, seconds and shares come only from it. Tracing makes elaboration several times slower and changes the order: when the file containing lean-ritsuryo's slowest theorem was recorded alternately, the theorem took 9.3–9.4 s without tracing, 29.3–29.6 s with every trace node captured and 18.1–18.6 s with a 1 ms capture threshold. Heartbeat order differs from time order (a `decide +kernel` theorem is second by time and fifth by heartbeats). The second pass elaborates again only the files that contain listed declarations, stops after the last listed command of each file, and enables the trace profiler only for the listed commands, in time mode with a 1 ms capture threshold; tactic nodes are always kept. With the same commit of lean-ritsuryo (54 files, 893 commands, `--jobs 4`), the first pass alone (`--detail none`) took 47.5 s of wall-clock time and the whole command 72.8–85.3 s. These are observations on a shared machine, not guarantees.
+
+Options:
+
+- `--project-dir DIR` measures now. `--paths PATH ...` and `--jobs N` select files and parallel workers as in `record-profile`.
+- `--profile file://profile.json` ranks an existing `--detail none` recording without measuring. It prints the ranking that measuring would print for that recording, without the breakdown.
+- `--detail none|steps` turns the breakdown off or on. It defaults to `steps` with `--project-dir`; `--profile` accepts only `none`.
+
+Give exactly one of `--project-dir` and `--profile`; otherwise the exit code is 252. Files with errors are reported on standard error, counted in `FilesWithErrors` and make the exit code 254, as does an error that appears only in the traced pass (tracing raises heartbeats, so a proof close to `maxHeartbeats` can fail there); the listing is still printed.
+
 ## Record and inspect
 
-The examples below use `tests/fixtures/steps` from this repository. Replace it with your Lake project directory.
+`record-profile` writes the untraced measurement as a JSON profile that `list-hotspots --profile`, `list-commands`, `list-files` and `compare-profiles` read. The examples below use `tests/fixtures/steps`.
 
 ```sh
 nix run github:conao3/rust-leanwake -- profile record-profile \
   --project-dir tests/fixtures/steps --jobs 4 --output-file base.json
+nix run github:conao3/rust-leanwake -- profile list-hotspots \
+  --profile file://base.json --limit 3 --output table
 nix run github:conao3/rust-leanwake -- profile list-commands \
   --profile file://base.json --limit 3 --output table
 ```
 
 ```text
-Heartbeats	ElapsedNs	Path	Key	HasErrors
-421038	46718672	Steps.lean	_aux_Steps___elabRules_tacticLocalClose_1	false
-84492	11920477	Steps.lean	simplifyMany	false
-50430	8005983	Steps.lean	heavy	false
+0.22 s in 12 commands and 1 file; the 3 listed take 89.0%
+Seconds  Share  Location  Declaration  Heartbeats
+0.16  69.2%  Steps.lean:3  repeated  34230
+0.04  16.6%  Steps.lean:22  _aux_Steps___elabRules_tacticLocalClose_1  421099
+0.01  3.3%  Steps.lean:8  heavy  50440
 ```
 
-By default, recording selects Lake's default target modules and their transitive imports inside the project. Use `--paths File.lean Directory` to choose files and directory trees relative to the project root. Hidden paths and symbolic links are excluded. Dependencies are prepared serially, then up to `--jobs` files are measured concurrently; the default is one worker.
+```text
+ElapsedNs	Heartbeats	Path	Key	HasErrors
+155421449	34230	Steps.lean	repeated	false
+37321254	421099	Steps.lean	_aux_Steps___elabRules_tacticLocalClose_1	false
+7383216	50440	Steps.lean	heavy	false
+```
+
+`list-commands` lists commands in descending elapsed time with their heartbeats; its JSON output carries each command's full record. By default, recording selects Lake's default target modules and their transitive imports inside the project. Use `--paths File.lean Directory` to choose files and directory trees relative to the project root. Hidden paths and symbolic links are excluded. Dependencies are prepared serially, then up to `--jobs` files are measured concurrently; the default is one worker.
 
 ```sh
 nix run github:conao3/rust-leanwake -- profile list-files \
@@ -44,7 +125,7 @@ nix run github:conao3/rust-leanwake -- profile list-files \
 
 ```text
 Path	Module	Commands	Heartbeats	ElapsedNs	HasErrors
-Steps.lean	Steps	12	707878	262923073	false
+Steps.lean	Steps	12	708097	224743642	false
 ```
 
 `--output-file` writes a JSON profile and leaves standard output empty. Without it, the profile is written to standard output; `--output text|table` selects a file summary instead. An error in one source is recorded with `HasErrors`; independent files continue. A process supervisor stops each subprocess group after completion or failure and when the host exits, including SIGINT, SIGTERM and SIGKILL. Processes deliberately detached into a separate process group are outside this lifecycle.
@@ -62,7 +143,7 @@ nix run github:conao3/rust-leanwake -- profile compare-profiles \
 
 ```text
 Regressed: 0  Improved: 0  Unchanged: 12  Added: 0  Removed: 0
-Heartbeats: 707878 -> 707878; thresholds: > 1000 heartbeats and > 1%
+Heartbeats: 708097 -> 708097; thresholds: > 1000 heartbeats and > 1%
 Status	BaseHeartbeats	HeadHeartbeats	DeltaHeartbeats	Path	Key
 ```
 
@@ -70,12 +151,12 @@ Changing the fixture's `heavy` theorem from `(List.range 100).length = 100` to `
 
 ```text
 Regressed: 1  Improved: 0  Unchanged: 11  Added: 0  Removed: 0
-Heartbeats: 707878 -> 785078; thresholds: > 1000 heartbeats and > 1%
+Heartbeats: 708097 -> 785298; thresholds: > 1000 heartbeats and > 1%
 Status	BaseHeartbeats	HeadHeartbeats	DeltaHeartbeats	Path	Key
-regressed	50430	127631	77201	Steps.lean	heavy
+regressed	50440	127641	77201	Steps.lean	heavy
 ```
 
-Commands are matched by `(Path, Key)` and classified as `regressed`, `improved`, `unchanged`, `added` or `removed`. A regression must satisfy both strict inequalities:
+Commands are matched by `(Path, Key)` and classified as `regressed`, `improved`, `unchanged`, `added` or `removed`. Comparison uses heartbeats, which are far more repeatable than elapsed time. A regression must satisfy both strict inequalities:
 
 ```text
 head - base > absolute-threshold-heartbeats
@@ -84,53 +165,9 @@ head - base > absolute-threshold-heartbeats
 
 Defaults are **1,000 heartbeats and 1%**. Improvement uses the same rule with base and head exchanged. Thresholds are nonnegative 64-bit integers; intermediate products and totals use arbitrary precision natural numbers. Equality at either threshold is unchanged. Added or removed commands alone do not fail CI.
 
-JSON output contains `Summary`, `Thresholds` and `Commands`. Unchanged rows are omitted; regressions come first, sorted by descending heartbeat increase. Missing counts are null, with zero used for their delta. The displayed range comes from head, or base for removals. Differing schema versions, toolchains or conditions, errored profiles and duplicate `(Path, Key)` identities are rejected before comparison results are emitted. Detail steps comparisons use command totals, not sums of trace nodes.
+JSON output contains `Summary`, `Thresholds` and `Commands`. Unchanged rows are omitted; regressions come first, sorted by descending heartbeat increase. Missing counts are null, with zero used for their delta. The displayed range comes from head, or base for removals. Differing toolchains or conditions, unsupported schema versions, errored profiles and duplicate `(Path, Key)` identities are rejected before comparison results are emitted. Detail steps comparisons use command totals, not sums of trace nodes.
 
 Matching groups commands by path before calling the Lean rules. Its worst-case work is the sum of each file's squared command count, rather than the square of the entire profile's count. Aggregation uses a tail-recursive fold. In a synthetic release-build benchmark with reversed file and command orders, 100 files × 500 commands took 0.37 s and 91 MiB peak RSS; 200 files × 500 commands took 0.72 s and 178 MiB. These are observations on one machine, not runtime guarantees. A single file with very many commands still has quadratic matching cost. The integration suite also compares one file containing 20,000 commands in reverse order on the standard process stack.
-
-## Inspect steps
-
-```sh
-nix run github:conao3/rust-leanwake -- profile record-profile \
-  --project-dir tests/fixtures/steps --detail steps --output-file steps.json
-nix run github:conao3/rust-leanwake -- profile list-steps \
-  --profile file://steps.json --path Steps.lean --key repeated --limit 12 --output table
-```
-
-```text
-Heartbeats	Depth	Range	Class	Kind
-49227	0	3:0-6:28	Elab.command	-
-31388	1	-	Elab.definition.header	-
-30070	2	-	Elab.step	-
-29930	3	-	Elab.step	-
-29596	4	-	Elab.app.args	-
-18245	5	-	Elab.step	-
-18144	6	-	Elab.step	-
-18025	7	-	Elab.step	-
-14789	1	-	Elab.definition.value	-
-14001	2	-	Elab.step	-
-13921	3	4:2-6:28	Leanwake.tactic	Lean.Parser.Tactic.tacticSeq
-13870	4	-	Elab.step	-
-```
-
-Each command's `Steps` is a trace forest. Nodes contain `Class`, `Heartbeats`, `Range` and `Children`; tactic nodes also contain `Kind`, the Lean syntax kind. `Leanwake.tactic` nodes preserve syntax positions by wrapping tactic elaborators, including newly registered elaborators in the measured file. Two occurrences of the same tactic on different lines remain distinct. Macro expansion may produce several nested nodes at the same source range. Nodes without retained source syntax have a null range.
-
-`--step-threshold-heartbeats N` keeps nodes with at least N heartbeats; the default is **1,000**. Retained children of omitted nodes are promoted to the nearest retained ancestor. Capture always uses `trace.profiler.useHeartbeats=true` with a zero capture threshold; filtering happens after measurement, so changing the output threshold does not change the measured command cost. `Depth` in `list-steps` is the depth of the retained tree, with roots at zero. Equal-cost nodes retain traversal order.
-
-Trace costs include their children. Adding all nodes double-counts nested work; use the command's `Heartbeats` for comparison. Trace collection adds elaboration work, so `Detail=none` and `Detail=steps` recordings cannot be compared. `list-steps` returns 254 for detail none or an unknown path/key.
-
-For all 61 files and 967 commands in lean-ritsuryo, the development host and native adapter on four CPUs recorded these sizes and times (decimal MB):
-
-| Detail / retained threshold | JSON size | Recording time |
-| --- | ---: | ---: |
-| none | 0.52 MB | 64.3 s |
-| steps / 0 | 6,907.92 MB | 189.3 s |
-| steps / 1,000 | 385.84 MB | 92.6–117.5 s |
-| steps / 10,000 | 47.05 MB | 94.3 s |
-
-Every recording had zero errored files and commands. The 1,000 default reduces the unfiltered JSON size by 94.4% and keeps 6,164 distinct tactic position/kind pairs; 10,000 keeps 4,632. It also keeps both small `simp` calls in the example. These elapsed times include concurrent machine load and are observations, not performance guarantees.
-
-Two recordings at the default step threshold differed in 15 command counts, with a maximum difference of 6 raw heartbeats. Comparison classified all 967 commands as unchanged and exited successfully.
 
 ## CI for a Lean project
 
@@ -158,10 +195,44 @@ jobs:
       - run: nix build github:conao3/rust-leanwake --out-link leanwake
       - run: ./leanwake/bin/leanwake profile record-profile --project-dir base --jobs 2 --output-file base.json
       - run: ./leanwake/bin/leanwake profile record-profile --project-dir head --jobs 2 --output-file head.json
+      - run: ./leanwake/bin/leanwake profile list-hotspots --profile file://head.json --output table
       - run: ./leanwake/bin/leanwake profile compare-profiles --base-profile file://base.json --head-profile file://head.json --output table
 ```
 
 Generate an [Actions lockfile](https://github.com/github/gh-actions-lock) for the workflow to pin its action tags to commits. The CLI returns 254 if a regression is found, causing the comparison step to fail.
+
+## Inspect steps
+
+`record-profile --detail steps` records the whole trace tree of every command:
+
+```sh
+nix run github:conao3/rust-leanwake -- profile record-profile \
+  --project-dir tests/fixtures/steps --detail steps --output-file steps.json
+nix run github:conao3/rust-leanwake -- profile list-steps \
+  --profile file://steps.json --path Steps.lean --key repeated --limit 12 --output table
+```
+
+```text
+ElapsedNs	Depth	Range	Class	Kind
+234794706	0	3:0-6:28	Elab.command	-
+228961345	1	-	Elab.def.processPreDef	-
+228768432	2	-	addDecl	-
+3230632	1	-	Elab.definition.header	-
+2756877	2	-	Elab.step	-
+2720898	3	-	Elab.step	-
+2671615	4	-	Elab.app.args	-
+1834465	5	-	Elab.step	-
+1821430	6	-	Elab.step	-
+1798013	7	-	Elab.step	-
+1785936	1	-	Elab.definition.value	-
+1596162	2	-	Elab.step	-
+```
+
+Each command's `Steps` is a trace forest. Nodes contain `Class`, `ElapsedNs`, `Range` and `Children`; tactic nodes also contain `Kind`, the Lean syntax kind. Capture uses `trace.profiler.useHeartbeats=false`, so node times come from Lean's monotonic clock. `Leanwake.tactic` nodes preserve syntax positions by wrapping tactic elaborators, including newly registered elaborators in the measured file. Two occurrences of the same tactic on different lines remain distinct. Macro expansion may produce several nested nodes at the same source range. Nodes without retained source syntax have a null range.
+
+`--step-threshold-ns N` keeps nodes of at least N nanoseconds; the default is **100,000** (0.1 ms). `Leanwake.tactic` nodes are always kept. Retained children of omitted nodes are promoted to the nearest retained ancestor. Capture uses a zero threshold and filtering happens after measurement, so changing the output threshold does not change the measured command cost. `Depth` in `list-steps` is the depth of the retained tree, with roots at zero. Equal-cost nodes retain traversal order.
+
+Trace costs include their children. Adding all nodes double-counts nested work; use the command's `Heartbeats` for comparison. Trace collection adds elaboration work, so `Detail=none` and `Detail=steps` recordings cannot be compared, and `list-hotspots --profile` accepts only `Detail=none`. `list-steps` returns 254 for detail none or an unknown path/key.
 
 ## Measurement and reproducibility
 
@@ -212,14 +283,14 @@ The source is [`src/rules.rs`](src/rules.rs). `leanfran` extracts it into `lean/
 
 ## Profile format
 
-The JSON schema remains version 1. This is an excerpt from an actual recording, with other commands omitted:
+The JSON schema is version 2. This is an excerpt from an actual recording, with other commands omitted:
 
 ```json
 {
-  "SchemaVersion": 1,
+  "SchemaVersion": 2,
   "Tool": {
     "Name": "leanwake",
-    "Version": "0.1.0"
+    "Version": "0.2.0"
   },
   "Toolchain": "Lean (version 4.35.0, Release)",
   "Conditions": {
@@ -230,9 +301,9 @@ The JSON schema remains version 1. This is an excerpt from an actual recording, 
     {
       "Path": "Steps.lean",
       "Module": "Steps",
-      "SourceSha256": "64745bd140e3e359c7aeba6625d8f32e12e7a54fca6739292033d19576c44f19",
+      "SourceSha256": "6adf6d5b41d62942741726bc8dd0950e618ba8b07a88689cdb225aa65262a354",
       "HasErrors": false,
-      "ImportElapsedNs": 806632810,
+      "ImportElapsedNs": 839380942,
       "Commands": [
         {
           "Key": "heavy",
@@ -250,8 +321,8 @@ The JSON schema remains version 1. This is an excerpt from an actual recording, 
               "Column": 16
             }
           },
-          "Heartbeats": 50430,
-          "ElapsedNs": 8005983,
+          "Heartbeats": 50440,
+          "ElapsedNs": 7383216,
           "HasErrors": false
         }
       ]
@@ -260,14 +331,14 @@ The JSON schema remains version 1. This is an excerpt from an actual recording, 
 }
 ```
 
-With `Detail=steps`, every command additionally has `Steps: [...]`; with `Detail=none`, that field is absent. Unknown fields, unsupported schema versions and inconsistent detail/step fields are rejected. All CLI JSON field names use PascalCase. File-valued parameters use `file://path`, and `file:///dev/stdin` reads standard input. Every command accepts `--output json|text|table`, `--debug`, `--no-debug`, `--version` and `help` at each command level. Global options can appear before or after the command names and `help`; an option value equal to `help` remains a value.
+With `Detail=steps`, every command additionally has `Steps: [...]`, whose nodes carry `ElapsedNs`; with `Detail=none`, that field is absent. Profiles with another `SchemaVersion` are rejected with exit code 254 and a message asking to record again. Unknown fields and inconsistent detail/step fields are rejected. All CLI JSON field names use PascalCase. File-valued parameters use `file://path`, and `file:///dev/stdin` reads standard input. Every command accepts `--output json|text|table`, `--debug`, `--no-debug`, `--version` and `help` at each command level. Global options can appear before or after the command names and `help`; an option value equal to `help` remains a value.
 
 ## Exit codes
 
 | Code | Meaning |
 | ---: | --- |
-| 0 | Successful recording/listing, or a comparison without regressions. |
-| 252 | Invalid command syntax or parameter, including malformed input JSON. |
+| 0 | Successful listing or recording, or a comparison without regressions. |
+| 252 | Invalid command syntax or parameter, including malformed input JSON and `list-hotspots` without exactly one of `--project-dir` and `--profile`. |
 | 254 | Project/source error, incompatible or invalid profile, unknown step selection, or detected regression. |
 | 255 | Host I/O failure, missing runtime configuration, or invalid adapter protocol. |
 
@@ -276,18 +347,22 @@ With `Detail=steps`, every command additionally has `Steps: [...]`; with `Detail
 - The project must declare `leanprover/lean4:v4.35.0`. Different toolchain recordings cannot be compared.
 - Lake's module setup, options, plugins and `-Dname=value` arguments are supported. Other `weakLeanArgs` or `moreLeanArgs` are rejected explicitly.
 - Measurements are top-level command costs. A command introducing multiple declarations has one cost and a list of names; it is not split into individual kernel declarations.
+- Elapsed time depends on machine load; the shares and the order of clearly separated declarations are more stable than the seconds. Declarations with similar times can change places between runs.
+- The breakdown covers time inside tactic nodes, or the self time of trace classes for declarations without tactics. Work outside them, such as the kernel check of a finished tactic proof, appears only as the part of the share that the listed entries do not cover.
 - Trace locations depend on retained syntax. Generated tactic syntax can share its macro call's range, and many internal trace classes have no position.
 - Very detailed recordings can require substantial memory and disk space. The output threshold reduces retained JSON, but all trace capture still runs.
-- Elapsed time is informational. Git checkout orchestration, time-based regression gates, graphs, cross-toolchain comparison and Mathlib-scale profiling are outside this release's validated scope.
+- Time-based regression gates, graphs, cross-toolchain comparison and Mathlib-scale profiling are outside this release's validated scope.
 - Linux is exercised in the integration tests. The flake defines an Apple Silicon package, but macOS execution has not been validated.
 
 ## Related tools
 
-- [Lean `trace.profiler`](https://github.com/leanprover/lean4/blob/v4.35.0/src/Lean/Util/Trace.lean): built-in nested tracing with time or heartbeat measurements.
+- [Lean `trace.profiler`](https://github.com/leanprover/lean4/blob/v4.35.0/src/Lean/Util/Trace.lean#L175-L235): built-in nested tracing with time or heartbeat measurements. Leanwake uses it for the breakdown.
+- [lean-source-profiler](https://github.com/Vilin97/lean-source-profiler): source-level timing of files, declarations, tactics and terms, with VS Code overlays and a repository viewer.
+- [leanprof](https://github.com/unbalancedparentheses/leanprof): runtime and elaboration profiling with file, declaration, term and tactic time and heartbeats, source attribution, and CI comparisons of declaration heartbeats.
 - [lakeprof](https://github.com/Kha/lakeprof): Lake build job timing and critical-path analysis.
 - [Radar](https://github.com/leanprover/radar): performance measurements across Lean revisions.
-- [leanprof](https://github.com/unbalancedparentheses/leanprof): runtime and elaboration profiling with source attribution and CI comparisons.
-- [lean-source-profiler](https://github.com/Vilin97/lean-source-profiler): source-level timing logs, VS Code overlays and a repository viewer.
+
+lean-source-profiler and leanprof also measure declaration and tactic time. Leanwake takes its ranking and seconds from an untraced measurement and traces only the declarations it lists, so the ranking is not distorted by tracing cost. Its comparison rules are proved in Lean, and its recordings carry their measurement conditions (toolchain, synchronous elaboration, detail), so comparing recordings made under different conditions fails instead of producing results.
 
 ## Development
 
