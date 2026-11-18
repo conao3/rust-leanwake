@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 const TACTIC: &str = "Leanwake.tactic";
 
 const TRACED_THRESHOLD_NS: u64 = 1_000_000;
+const RIGHT_ALIGNED: [usize; 3] = [0, 1, 4];
 
 const SEQUENCES: [&str; 3] = [
     "Lean.Parser.Tactic.tacticSeq",
@@ -279,12 +280,9 @@ fn emit(listing: &Listing, output: Output) -> Result<()> {
         return Ok(());
     }
     let steps = listing.detail == "steps";
-    let separator = if matches!(output, Output::Table) {
-        "  "
-    } else {
-        "\t"
-    };
-    if matches!(output, Output::Table) {
+    let table = matches!(output, Output::Table);
+    let mut rows = Vec::new();
+    if table {
         writeln!(
             stdout,
             "{} s in {} and {}; the {} listed take {}",
@@ -298,7 +296,7 @@ fn emit(listing: &Listing, output: Output) -> Result<()> {
         if steps {
             header.push("Inside");
         }
-        writeln!(stdout, "{}", header.join(separator))?;
+        rows.push(header.into_iter().map(String::from).collect::<Vec<_>>());
     }
     for hotspot in &listing.hotspots {
         let mut fields = vec![
@@ -311,7 +309,40 @@ fn emit(listing: &Listing, output: Output) -> Result<()> {
         if let Some(traced) = &hotspot.traced {
             fields.push(traced.inside.first().map_or_else(|| "-".into(), describe));
         }
-        writeln!(stdout, "{}", fields.join(separator))?;
+        rows.push(fields);
+    }
+    if !table {
+        for row in &rows {
+            writeln!(stdout, "{}", row.join("\t"))?;
+        }
+        return Ok(());
+    }
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..columns)
+        .map(|column| {
+            rows.iter()
+                .filter_map(|row| row.get(column))
+                .map(|cell| cell.chars().count())
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    for row in &rows {
+        let last = row.len() - 1;
+        let cells: Vec<String> = row
+            .iter()
+            .enumerate()
+            .map(|(column, cell)| {
+                if RIGHT_ALIGNED.contains(&column) {
+                    format!("{cell:>width$}", width = widths[column])
+                } else if column == last {
+                    cell.clone()
+                } else {
+                    format!("{cell:<width$}", width = widths[column])
+                }
+            })
+            .collect();
+        writeln!(stdout, "{}", cells.join("  "))?;
     }
     Ok(())
 }

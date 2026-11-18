@@ -27,17 +27,17 @@ nix run github:conao3/rust-leanwake -- profile list-hotspots \
 ```
 
 ```text
-0.79 s in 6 commands and 3 files; the 6 listed take 100.0%
-Seconds  Share  Location  Declaration  Heartbeats  Inside
-0.66  83.1%  Hot/Slow.lean:4  slow  3132843  decide 6:4-6:18 x1 98.5%
-0.06  7.2%  Hot/Slow.lean:1  small  18007  simp 2:2-2:6 x1 2.3%
-0.05  6.9%  Hot/Quick.lean:1  double  18804  addDecl x1 80.2%
-0.01  1.8%  Hot/Slow.lean:9  termMode  85105  Meta.whnf x161 41.5%
-0.00  0.5%  Hot/Quick.lean:5  add_zero'  17293  simp 6:2-6:6 x1 23.1%
-0.00  0.4%  Hot/Quick.lean:3  double_zero  8408  Elab.command x1 44.3%
+1.09 s in 6 commands and 3 files; the 6 listed take 100.0%
+Seconds  Share  Location          Declaration  Heartbeats  Inside
+   0.92  84.6%  Hot/Slow.lean:4   slow            3132843  decide 6:4-6:18 x1 98.3%
+   0.07   6.4%  Hot/Slow.lean:1   small             18007  simp 2:2-2:6 x1 2.8%
+   0.07   6.1%  Hot/Quick.lean:1  double            18804  addDecl x1 85.7%
+   0.02   1.9%  Hot/Slow.lean:9   termMode          85105  Meta.whnf x241 50.3%
+   0.01   0.6%  Hot/Quick.lean:5  add_zero'         17293  simp 6:2-6:6 x1 17.4%
+   0.00   0.3%  Hot/Quick.lean:3  double_zero        8408  Elab.command x1 50.6%
 ```
 
-The first line gives the total elaboration time of all measured commands, the numbers of commands and files, and the share of the total taken by the listed rows. Each row is one top-level command in descending elapsed time: seconds, share of the total, file and start line, declaration name (the first of `Names`, or the command kind for commands that introduce no named declaration), raw heartbeats, and the largest entry of the breakdown. `decide 6:4-6:18 x1 98.5%` means that the `decide` tactic at line 6, columns 4 to 18, ran once and took 98.5% of the declaration's traced time. Lines are one-based, columns zero-based, and end positions exclusive.
+The first line gives the total elaboration time of all measured commands, the numbers of commands and files, and the share of the total taken by the listed rows. Each row is one top-level command in descending elapsed time: seconds, share of the total, file and start line, declaration name (the first of `Names`, or the command kind for commands that introduce no named declaration), raw heartbeats, and the largest entry of the breakdown. `decide 6:4-6:18 x1 98.3%` means that the `decide` tactic at line 6, columns 4 to 18, ran once and took 98.3% of the declaration's traced time. Lines are one-based, columns zero-based, and end positions exclusive.
 
 The breakdown groups the innermost tactic nodes that carry a source range by tactic kind and range, and sums their time; `x4` means the tactic node at that position ran four times, for example under `<;>` or `all_goals`. When a chain of nodes shares one range, the row names the outermost tactic that is not a tactic sequence. A declaration without tactic nodes, such as a term-mode proof or a definition, shows the trace classes with the most self time (node time minus the time of its retained children) instead, like `Meta.whnf` and `addDecl` above. Breakdown shares are relative to the declaration's time in the traced pass and never add up to more than 100%; the remainder is spent outside the listed tactics, for example in the kernel check of the finished proof.
 
@@ -102,11 +102,11 @@ nix run github:conao3/rust-leanwake -- profile list-commands \
 ```
 
 ```text
-0.22 s in 12 commands and 1 file; the 3 listed take 89.0%
-Seconds  Share  Location  Declaration  Heartbeats
-0.16  69.2%  Steps.lean:3  repeated  34230
-0.04  16.6%  Steps.lean:22  _aux_Steps___elabRules_tacticLocalClose_1  421099
-0.01  3.3%  Steps.lean:8  heavy  50440
+0.60 s in 12 commands and 1 file; the 3 listed take 90.2%
+Seconds  Share  Location       Declaration                                Heartbeats
+   0.39  65.3%  Steps.lean:3   repeated                                        34230
+   0.11  18.0%  Steps.lean:22  _aux_Steps___elabRules_tacticLocalClose_1      421099
+   0.04   7.0%  Steps.lean:27  simplifyMany                                    84502
 ```
 
 ```text
