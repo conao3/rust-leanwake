@@ -1,3 +1,4 @@
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -69,7 +70,7 @@ pub struct Step {
     pub class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    pub heartbeats: u64,
+    pub elapsed_ns: u64,
     pub range: Option<Range>,
     pub children: Vec<Step>,
 }
@@ -83,13 +84,40 @@ impl Drop for Step {
     }
 }
 
+pub const SCHEMA_VERSION: u32 = 2;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct Version {
+    schema_version: serde_json::Value,
+}
+
+pub fn read(input: &str, parameter: &str) -> Result<Profile> {
+    let version: Version = crate::json_io::read(input.as_bytes())
+        .map_err(|e| Error::parameter(format!("{parameter}: {e}")))?;
+    if version.schema_version != SCHEMA_VERSION {
+        return Err(Error::target(format!(
+            "{parameter}: unsupported SchemaVersion={}; this leanwake reads SchemaVersion={SCHEMA_VERSION}, so record the profile again",
+            version.schema_version
+        )));
+    }
+    crate::json_io::read(input.as_bytes())
+        .map_err(|e| Error::parameter(format!("{parameter}: {e}")))
+}
+
 impl Profile {
-    pub fn validate_steps(&self) -> crate::error::Result<()> {
+    pub fn validate(&self, side: &str) -> Result<()> {
+        if self.conditions.r#async || !matches!(self.conditions.detail.as_str(), "none" | "steps") {
+            return Err(Error::target(format!(
+                "{side}: unsupported Conditions={}",
+                serde_json::to_string(&self.conditions)?
+            )));
+        }
         for file in &self.files {
             for command in &file.commands {
                 if command.steps.is_some() != (self.conditions.detail == "steps") {
-                    return Err(crate::error::Error::target(format!(
-                        "Steps disagree with Conditions.Detail for Path {:?}, Key {:?}",
+                    return Err(Error::target(format!(
+                        "{side}: Steps disagree with Conditions.Detail for Path {:?}, Key {:?}",
                         file.path, command.key
                     )));
                 }

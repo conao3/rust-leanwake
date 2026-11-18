@@ -37,7 +37,7 @@ pub fn run(
         rows.push((step, depth));
         pending.extend(step.children.iter().rev().map(|child| (child, depth + 1)));
     }
-    rows.sort_by_key(|(step, _)| std::cmp::Reverse(step.heartbeats));
+    rows.sort_by_key(|(step, _)| std::cmp::Reverse(step.elapsed_ns));
     if let Some(limit) = limit {
         rows.truncate(limit);
     }
@@ -49,7 +49,7 @@ pub fn run(
                 .map(|(step, depth)| {
                     json!({
                         "Class": step.class, "Kind": step.kind, "Range": step.range,
-                        "Heartbeats": step.heartbeats, "Depth": depth,
+                        "ElapsedNs": step.elapsed_ns, "Depth": depth,
                     })
                 })
                 .collect();
@@ -63,7 +63,7 @@ pub fn run(
         }
         Output::Text | Output::Table => {
             if matches!(output, Output::Table) {
-                writeln!(stdout, "Heartbeats\tDepth\tRange\tClass\tKind")?;
+                writeln!(stdout, "ElapsedNs\tDepth\tRange\tClass\tKind")?;
             }
             for (step, depth) in rows {
                 let range = step
@@ -79,7 +79,7 @@ pub fn run(
                 writeln!(
                     stdout,
                     "{}\t{}\t{}\t{}\t{}",
-                    step.heartbeats,
+                    step.elapsed_ns,
                     depth,
                     range,
                     step.class,

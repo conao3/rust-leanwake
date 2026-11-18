@@ -205,7 +205,7 @@ fn measure(
         });
     };
     let request = json!({"path": file.path, "setup": setup, "arguments": file.metadata.arguments,
-        "detail": options.detail.as_str(), "stepThresholdHeartbeats": options.step_threshold_heartbeats});
+        "detail": options.detail.as_str(), "stepThresholdNs": options.step_threshold_ns});
     let mut input = serde_json::to_vec(&request)?;
     input.push(b'\n');
     let output = process::run(
@@ -286,7 +286,7 @@ pub fn record(options: &Record) -> Result<Profile> {
         .map(|(_, result)| result)
         .collect::<Result<Vec<_>>>()?;
     Ok(Profile {
-        schema_version: 1,
+        schema_version: crate::model::SCHEMA_VERSION,
         tool: Tool {
             name: "leanwake".into(),
             version: env!("CARGO_PKG_VERSION").into(),

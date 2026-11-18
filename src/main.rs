@@ -16,17 +16,8 @@ use serde_json::{Value, json};
 use std::io::Write;
 
 fn load_profile(input: &str) -> Result<Profile> {
-    let profile: Profile =
-        json_io::read(input.as_bytes()).map_err(|e| Error::parameter(format!("--profile: {e}")))?;
-    if profile.schema_version != 1
-        || profile.conditions.r#async
-        || !matches!(profile.conditions.detail.as_str(), "none" | "steps")
-    {
-        return Err(Error::target(
-            "unsupported profile schema or measurement conditions",
-        ));
-    }
-    profile.validate_steps()?;
+    let profile = model::read(input, "--profile")?;
+    profile.validate("--profile")?;
     Ok(profile)
 }
 
@@ -57,7 +48,7 @@ fn emit(value: &Value, rows: &[Value], output: Output) -> Result<()> {
         Output::Text | Output::Table => {
             let command_rows = value.get("Commands").is_some();
             let fields: &[&str] = if command_rows {
-                &["Heartbeats", "ElapsedNs", "Path", "Key", "HasErrors"]
+                &["ElapsedNs", "Heartbeats", "Path", "Key", "HasErrors"]
             } else {
                 &[
                     "Path",
@@ -125,8 +116,8 @@ fn run(cli: Cli) -> Result<u8> {
                 .flat_map(|file| file.commands.iter().map(move |command| (file, command)))
                 .collect();
             commands.sort_by(|(af, a), (bf, b)| {
-                b.heartbeats
-                    .cmp(&a.heartbeats)
+                b.elapsed_ns
+                    .cmp(&a.elapsed_ns)
                     .then_with(|| af.path.cmp(&bf.path))
                     .then_with(|| a.key.cmp(&b.key))
             });

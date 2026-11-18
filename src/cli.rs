@@ -93,14 +93,14 @@ pub enum Command {
 pub enum ProfileCommand {
     #[command(about = "Record command costs in a Lake project")]
     RecordProfile(Record),
-    #[command(about = "List commands in descending heartbeat order")]
+    #[command(about = "List commands in descending elapsed time order")]
     ListCommands {
         #[arg(long, value_parser = value)]
         profile: String,
         #[arg(long, value_parser = positive)]
         limit: Option<usize>,
     },
-    #[command(about = "List a command's trace nodes in descending heartbeat order")]
+    #[command(about = "List a command's trace nodes in descending elapsed time order")]
     ListSteps {
         #[arg(long, value_parser = value)]
         profile: String,
@@ -132,8 +132,8 @@ pub struct Record {
     pub jobs: usize,
     #[arg(long, default_value = "none", value_parser = detail)]
     pub detail: Detail,
-    #[arg(long, default_value = "1000", value_parser = natural)]
-    pub step_threshold_heartbeats: u64,
+    #[arg(long, default_value = "100000", value_parser = natural)]
+    pub step_threshold_ns: u64,
 }
 
 #[derive(Args)]

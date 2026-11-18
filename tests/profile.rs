@@ -269,8 +269,7 @@ fn records_are_deterministic_and_preserve_lake_configuration() {
     let listed: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(listed["Commands"].as_array().unwrap().len(), 2);
     assert!(
-        listed["Commands"][0]["Heartbeats"].as_u64()
-            >= listed["Commands"][1]["Heartbeats"].as_u64()
+        listed["Commands"][0]["ElapsedNs"].as_u64() >= listed["Commands"][1]["ElapsedNs"].as_u64()
     );
     for format in ["json", "text", "table"] {
         let output = cli(&[
@@ -476,7 +475,7 @@ fn explicit_paths_skip_hidden_files_and_symlinks_and_support_external_modules() 
 fn stdin_profiles_and_file_parameters_work() {
     use std::io::Write;
     use std::process::Stdio;
-    let input = json!({"SchemaVersion":1,"Tool":{"Name":"leanwake","Version":"0.1.0"},"Toolchain":"test","Conditions":{"Async":false,"Detail":"none"},"Files":[]});
+    let input = json!({"SchemaVersion":2,"Tool":{"Name":"leanwake","Version":"0.2.0"},"Toolchain":"test","Conditions":{"Async":false,"Detail":"none"},"Files":[]});
     let mut child = Command::new(env!("CARGO_BIN_EXE_leanwake"))
         .args(["profile", "list-files", "--profile", "file:///dev/stdin"])
         .stdin(Stdio::piped())
@@ -506,7 +505,7 @@ fn stdin_profiles_and_file_parameters_work() {
     assert_code(&out, 0);
     assert_eq!(
         String::from_utf8(out.stdout).unwrap(),
-        "Heartbeats\tElapsedNs\tPath\tKey\tHasErrors\n"
+        "ElapsedNs\tHeartbeats\tPath\tKey\tHasErrors\n"
     );
 }
 
@@ -648,8 +647,8 @@ fn comparison(base: &Value, head: &Value, options: &[&str], code: i32) -> Value 
 
 fn synthetic_profile(entries: &[(&str, &str, u64)]) -> Value {
     json!({
-        "SchemaVersion": 1,
-        "Tool": {"Name": "leanwake", "Version": "0.1.0"},
+        "SchemaVersion": 2,
+        "Tool": {"Name": "leanwake", "Version": "0.2.0"},
         "Toolchain": "Lean (version 4.35.0, Release)",
         "Conditions": {"Async": false, "Detail": "none"},
         "Files": entries.iter().map(|(path, key, heartbeats)| json!({
@@ -837,7 +836,6 @@ fn invalid_comparison_inputs_are_rejected_before_results() {
     let result = comparison(&valid, &valid, &[], 0);
     assert_eq!(result["Summary"]["Unchanged"], 1);
     for (field, value) in [
-        ("SchemaVersion", json!(2)),
         ("Toolchain", json!("different toolchain")),
         ("Conditions", json!({"Async": true, "Detail": "none"})),
         ("Conditions", json!({"Async": false, "Detail": "steps"})),
@@ -894,8 +892,15 @@ fn invalid_comparison_inputs_are_rejected_before_results() {
         }
     }
     let mut unsupported = valid.clone();
-    unsupported["SchemaVersion"] = json!(2);
-    assert_code(&compare(&unsupported, &unsupported, &[]), 254);
+    unsupported["SchemaVersion"] = json!(1);
+    for (base, head) in [(&valid, &unsupported), (&unsupported, &valid)] {
+        let output = compare(base, head, &[]);
+        assert_code(&output, 254);
+        assert!(output.stdout.is_empty());
+        let error = String::from_utf8(output.stderr).unwrap();
+        assert!(error.contains("SchemaVersion=1"), "{error}");
+        assert!(error.contains("record the profile again"), "{error}");
+    }
     assert_code(
         &cli(&["profile", "compare-profiles", "--base-profile", "{}"]),
         252,
@@ -1024,6 +1029,20 @@ fn flatten_steps(nodes: &[Value]) -> Vec<&Value> {
         .collect()
 }
 
+fn shape(nodes: &[Value]) -> Vec<Value> {
+    nodes
+        .iter()
+        .map(|node| {
+            json!([
+                node["Class"],
+                node["Kind"],
+                node["Range"],
+                shape(node["Children"].as_array().unwrap())
+            ])
+        })
+        .collect()
+}
+
 fn record_steps(root: &Path, threshold: &str) -> Value {
     let output = cli(&[
         "profile",
@@ -1032,7 +1051,7 @@ fn record_steps(root: &Path, threshold: &str) -> Value {
         root.to_str().unwrap(),
         "--detail",
         "steps",
-        "--step-threshold-heartbeats",
+        "--step-threshold-ns",
         threshold,
     ]);
     assert_code(&output, 0);
@@ -1057,7 +1076,7 @@ fn steps_preserve_tactic_locations_kinds_and_repeatable_heartbeats() {
                 (
                     row["Key"].clone(),
                     row["Heartbeats"].clone(),
-                    row["Steps"].clone(),
+                    shape(row["Steps"].as_array().unwrap()),
                 )
             })
             .collect::<Vec<_>>()
@@ -1081,7 +1100,7 @@ fn steps_preserve_tactic_locations_kinds_and_repeatable_heartbeats() {
                 "End": {"Line": line, "Column": 28},
             })
         );
-        assert!(node["Heartbeats"].as_u64().unwrap() > 0);
+        assert!(node["ElapsedNs"].as_u64().unwrap() > 0);
     }
     assert!(nodes.iter().any(|node| node["Range"].is_null()));
     assert!(
@@ -1101,7 +1120,7 @@ fn steps_preserve_tactic_locations_kinds_and_repeatable_heartbeats() {
             nodes.iter().any(|node| {
                 node["Class"] == "Leanwake.tactic"
                     && !node["Range"].is_null()
-                    && node["Heartbeats"].as_u64().unwrap() > 0
+                    && node["ElapsedNs"].as_u64().unwrap() > 0
             }),
             "missing tactic trace for {key}"
         );
@@ -1122,7 +1141,7 @@ fn steps_preserve_tactic_locations_kinds_and_repeatable_heartbeats() {
             .iter()
             .any(|node| {
                 node["Class"] == "Meta.Tactic.simp.discharge"
-                    && node["Heartbeats"].as_u64().unwrap() > 0
+                    && node["ElapsedNs"].as_u64().unwrap() > 0
             })
     );
     let comparison = comparison(&first, &second, &[], 0);
@@ -1132,16 +1151,25 @@ fn steps_preserve_tactic_locations_kinds_and_repeatable_heartbeats() {
     assert!(commands(&none).iter().all(|row| row.get("Steps").is_none()));
     assert_code(&compare(&none, &first, &[]), 254);
     assert_code(&compare(&first, &none, &[]), 254);
-    let filtered = record_steps(&root, "1000");
+    let filtered = record_steps(&root, "100000");
     for (full, filtered) in commands(&first).iter().zip(commands(&filtered)) {
         assert_eq!(full["Key"], filtered["Key"]);
         assert_eq!(full["Heartbeats"], filtered["Heartbeats"]);
         for node in flatten_steps(filtered["Steps"].as_array().unwrap()) {
-            assert!(node["Heartbeats"].as_u64().unwrap() >= 1000);
+            assert!(
+                node["Class"] == "Leanwake.tactic"
+                    || node["ElapsedNs"].as_u64().unwrap() >= 100_000
+            );
         }
     }
     let empty = record_steps(&root, "18446744073709551615");
-    assert!(commands(&empty).iter().all(|row| row["Steps"] == json!([])));
+    for row in commands(&empty) {
+        assert!(
+            flatten_steps(row["Steps"].as_array().unwrap())
+                .iter()
+                .all(|node| node["Class"] == "Leanwake.tactic")
+        );
+    }
 }
 
 #[test]
@@ -1177,7 +1205,7 @@ fn step_listings_select_one_command_sort_limit_and_validate_input() {
     assert!(
         steps
             .windows(2)
-            .all(|pair| pair[0]["Heartbeats"].as_u64() >= pair[1]["Heartbeats"].as_u64())
+            .all(|pair| pair[0]["ElapsedNs"].as_u64() >= pair[1]["ElapsedNs"].as_u64())
     );
     assert!(steps.iter().any(|step| step["Depth"].as_u64().unwrap() > 0));
     for format in ["text", "table"] {
@@ -1220,10 +1248,10 @@ fn deep_steps_can_be_read_listed_compared_and_serialized() {
     profile["Conditions"]["Detail"] = json!("steps");
     profile["Files"][0]["Commands"][0]["Steps"] = json!("TREE");
     let mut tree =
-        String::from("{\"Class\":\"leaf\",\"Heartbeats\":9999,\"Range\":null,\"Children\":[]}");
+        String::from("{\"Class\":\"leaf\",\"ElapsedNs\":9999,\"Range\":null,\"Children\":[]}");
     for _ in 0..200 {
         tree = format!(
-            "{{\"Class\":\"parent\",\"Heartbeats\":1,\"Range\":null,\"Children\":[{tree}]}}"
+            "{{\"Class\":\"parent\",\"ElapsedNs\":1,\"Range\":null,\"Children\":[{tree}]}}"
         );
     }
     let root = fixture("steps");

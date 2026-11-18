@@ -8,7 +8,7 @@ theorem repeated (n : Nat) : (n + 0 = n) ∧ (n + 0 = n) := by
 theorem heavy : (List.range 100).length = 100 := by
   decide +kernel
 
-set_option trace.profiler.useHeartbeats false in
+set_option trace.profiler.useHeartbeats true in
  theorem configured (n : Nat) : n + 0 = n := by
   simp only [Nat.add_zero]
 

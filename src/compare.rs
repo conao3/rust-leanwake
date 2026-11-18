@@ -9,23 +9,8 @@ use std::io::Write;
 
 type Ranges = BTreeMap<(String, String), Range>;
 
-fn read(input: &str, parameter: &str) -> Result<Profile> {
-    crate::json_io::read(input.as_bytes())
-        .map_err(|e| Error::parameter(format!("{parameter}: {e}")))
-}
-
 fn validate(profile: Profile, side: &str) -> Result<(Vec<Entry>, Ranges)> {
-    if profile.schema_version != 1
-        || profile.conditions.r#async
-        || !matches!(profile.conditions.detail.as_str(), "none" | "steps")
-    {
-        return Err(Error::target(format!(
-            "{side}: unsupported SchemaVersion={} or Conditions={}",
-            profile.schema_version,
-            serde_json::to_string(&profile.conditions)?
-        )));
-    }
-    profile.validate_steps()?;
+    profile.validate(side)?;
     let mut entries = Vec::new();
     let mut ranges = BTreeMap::new();
     for file in profile.files {
@@ -96,8 +81,8 @@ struct DisplayRow {
 }
 
 pub fn run(options: Compare, output: Output) -> Result<u8> {
-    let base = read(&options.base_profile, "--base-profile")?;
-    let head = read(&options.head_profile, "--head-profile")?;
+    let base = crate::model::read(&options.base_profile, "--base-profile")?;
+    let head = crate::model::read(&options.head_profile, "--head-profile")?;
     let metadata = |profile: &Profile| {
         json!({
             "SchemaVersion": profile.schema_version, "Toolchain": profile.toolchain,

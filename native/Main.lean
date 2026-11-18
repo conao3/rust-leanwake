@@ -8,7 +8,7 @@ structure Request where
   setup : ModuleSetup
   arguments : Array String
   detail : String
-  stepThresholdHeartbeats : Nat
+  stepThresholdNs : Nat
   deriving FromJson
 
 def positionJson (p : Position) : Json :=
@@ -18,7 +18,7 @@ def measurementOptions (steps : Bool) (opts : Options) : Options :=
   let opts := opts.setBool `Elab.async false
   if steps then
     opts.setBool `trace.profiler true |>.set `trace.profiler.threshold (0 : Nat)
-      |>.setBool `trace.profiler.useHeartbeats true |>.set `trace.profiler.output ""
+      |>.setBool `trace.profiler.useHeartbeats false |>.set `trace.profiler.output ""
   else opts
 
 initialize wrappedCommands : SimpleScopedEnvExtension Name (PHashSet Name) ←
@@ -98,11 +98,11 @@ partial def traceJson (fm : FileMap) (threshold : Nat) (origin : Option Syntax) 
     MessageData → Array Json
   | .trace data msg children => Id.run do
     let children := children.flatMap (traceJson fm threshold none)
-    let heartbeats := (data.stopTime - data.startTime).toUInt64.toNat
-    if heartbeats < threshold then return children
+    let elapsed := ((data.stopTime - data.startTime) * 1000000000).round.toUInt64.toNat
+    if elapsed < threshold && data.cls != `Leanwake.tactic then return children
     let stx := (originatingSyntax msg).or origin
     let fields := [
-      ("Class", toJson data.cls.toString), ("Heartbeats", toJson heartbeats),
+      ("Class", toJson data.cls.toString), ("ElapsedNs", toJson elapsed),
       ("Range", stx.map (syntaxRange fm) |>.getD Json.null),
       ("Children", toJson children)]
     let fields := if data.cls == `Leanwake.tactic then
@@ -233,7 +233,7 @@ unsafe def profile (req : Request) : IO Json := do
       for message in messages.toList do IO.eprintln (← message.toString)
       pure (#[], true)
     else do
-      let (result, _) ← (measureCommands req.path input steps req.stepThresholdHeartbeats).run
+      let (result, _) ← (measureCommands req.path input steps req.stepThresholdNs).run
         { inputCtx := ictx } |>.run {
         commandState := Command.mkState (forceSynchronous steps env) messages opts,
         parserState := ps, cmdPos := ps.pos }
