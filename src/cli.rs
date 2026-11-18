@@ -1,4 +1,4 @@
-use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
@@ -91,6 +91,8 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum ProfileCommand {
+    #[command(about = "List the declarations that take the most elaboration time")]
+    ListHotspots(Hotspots),
     #[command(about = "Record command costs in a Lake project")]
     RecordProfile(Record),
     #[command(about = "List commands in descending elapsed time order")]
@@ -132,8 +134,29 @@ pub struct Record {
     pub jobs: usize,
     #[arg(long, default_value = "none", value_parser = detail)]
     pub detail: Detail,
-    #[arg(long, default_value = "100000", value_parser = natural)]
+    #[arg(long, default_value_t = STEP_THRESHOLD_NS, value_parser = natural)]
     pub step_threshold_ns: u64,
+    #[arg(skip)]
+    pub capture_threshold_ms: u64,
+}
+
+pub const STEP_THRESHOLD_NS: u64 = 100_000;
+
+#[derive(Args)]
+#[command(group(ArgGroup::new("input").required(true).args(["project_dir", "profile"])))]
+pub struct Hotspots {
+    #[arg(long, value_parser = path)]
+    pub project_dir: Option<PathBuf>,
+    #[arg(long, num_args = 1.., value_parser = path)]
+    pub paths: Vec<PathBuf>,
+    #[arg(long, value_parser = positive)]
+    pub jobs: Option<usize>,
+    #[arg(long, value_parser = value)]
+    pub profile: Option<String>,
+    #[arg(long, default_value = "10", value_parser = positive)]
+    pub limit: usize,
+    #[arg(long, value_parser = detail)]
+    pub detail: Option<Detail>,
 }
 
 #[derive(Args)]

@@ -1,0 +1,6 @@
+name = "hot"
+version = "0.1.0"
+defaultTargets = ["Hot"]
+
+[[lean_lib]]
+name = "Hot"

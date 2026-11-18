@@ -103,6 +103,7 @@ fn help_and_syntax_follow_the_command_tree() {
         vec!["help"],
         vec!["profile", "help"],
         vec!["profile", "record-profile", "help"],
+        vec!["profile", "list-hotspots", "help"],
         vec!["profile", "list-commands", "help"],
         vec!["profile", "list-files", "help"],
         vec!["profile", "list-steps", "help"],
@@ -1573,4 +1574,251 @@ fn single_file_comparisons_handle_twenty_thousand_commands() {
     assert_eq!(result["Summary"]["BaseHeartbeats"], 2_000_000);
     assert_eq!(result["Summary"]["HeadHeartbeats"], 2_000_000);
     assert_eq!(result["Commands"], json!([]));
+}
+
+fn hotspots(args: &[&str], code: i32) -> Value {
+    let mut all = vec!["profile", "list-hotspots"];
+    all.extend_from_slice(args);
+    let output = cli(&all);
+    assert_code(&output, code);
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn assert_shares(listing: &Value) {
+    let rows = listing["Hotspots"].as_array().unwrap();
+    let total = listing["ElapsedNs"].as_u64().unwrap();
+    let listed: u64 = rows
+        .iter()
+        .map(|row| row["ElapsedNs"].as_u64().unwrap())
+        .sum();
+    assert_eq!(listing["ListedElapsedNs"], listed);
+    assert!(listed <= total);
+    let shares: f64 = rows.iter().map(|row| row["Share"].as_f64().unwrap()).sum();
+    assert!(shares <= 1.0 + 1e-9, "{shares}");
+    assert!(listing["ListedShare"].as_f64().unwrap() <= 1.0);
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[0]["ElapsedNs"].as_u64() >= pair[1]["ElapsedNs"].as_u64())
+    );
+    for row in rows {
+        let Some(traced) = row.get("Traced") else {
+            continue;
+        };
+        let inside = traced["Inside"].as_array().unwrap();
+        let elapsed: u64 = inside
+            .iter()
+            .map(|entry| entry["ElapsedNs"].as_u64().unwrap())
+            .sum();
+        assert!(elapsed <= traced["ElapsedNs"].as_u64().unwrap(), "{row}");
+        let shares: f64 = inside
+            .iter()
+            .map(|entry| entry["Share"].as_f64().unwrap())
+            .sum();
+        assert!(shares <= 1.0 + 1e-9, "{row}");
+    }
+}
+
+#[test]
+fn hotspots_rank_the_slow_declaration_and_its_dominant_tactic() {
+    let root = fixture("hotspots");
+    assert_code(&lake_build(&root), 0);
+    let dir = root.to_str().unwrap();
+    let listing = hotspots(&["--project-dir", dir, "--jobs", "4", "--limit", "50"], 0);
+    pascal_case(&listing);
+    assert_eq!(listing["Detail"], "steps");
+    assert_eq!(listing["Files"], 3);
+    assert_eq!(listing["Commands"], 6);
+    assert_eq!(listing["FilesWithErrors"], 0);
+    let rows = listing["Hotspots"].as_array().unwrap();
+    assert_eq!(rows.len(), 6);
+    let total: u64 = rows
+        .iter()
+        .map(|row| row["ElapsedNs"].as_u64().unwrap())
+        .sum();
+    assert_eq!(listing["ElapsedNs"], total);
+    assert_shares(&listing);
+    let first = &rows[0];
+    assert_eq!(first["Path"], "Hot/Slow.lean");
+    assert_eq!(first["Range"]["Start"], json!({"Line": 4, "Column": 0}));
+    assert_eq!(first["Name"], "slow");
+    assert_eq!(first["Key"], "slow");
+    let inside = &first["Traced"]["Inside"][0];
+    assert_eq!(inside["Class"], "Leanwake.tactic");
+    assert_eq!(inside["Kind"], "Lean.Parser.Tactic.decide");
+    assert_eq!(
+        inside["Range"],
+        json!({"Start": {"Line": 6, "Column": 4}, "End": {"Line": 6, "Column": 18}})
+    );
+    assert_eq!(inside["Count"], 1);
+    let term = rows.iter().find(|row| row["Name"] == "termMode").unwrap();
+    let entries = term["Traced"]["Inside"].as_array().unwrap();
+    assert!(!entries.is_empty());
+    assert!(
+        entries
+            .iter()
+            .all(|entry| entry["Kind"].is_null() && entry["Range"].is_null())
+    );
+    let top = hotspots(&["--project-dir", dir, "--limit", "1"], 0);
+    assert_eq!(top["Hotspots"].as_array().unwrap().len(), 1);
+    assert_eq!(top["Hotspots"][0]["Name"], "slow");
+    assert_eq!(
+        top["Hotspots"][0]["Traced"]["Inside"][0]["Kind"],
+        "Lean.Parser.Tactic.decide"
+    );
+    assert_eq!(top["Commands"], 6);
+    assert!(top["ListedShare"].as_f64().unwrap() < 1.0);
+    assert_shares(&top);
+    let untraced = hotspots(&["--project-dir", dir, "--detail", "none"], 0);
+    assert_eq!(untraced["Detail"], "none");
+    assert!(untraced["Hotspots"][0].get("Traced").is_none());
+    assert_eq!(untraced["Hotspots"][0]["Name"], "slow");
+    let table = cli(&[
+        "profile",
+        "list-hotspots",
+        "--project-dir",
+        dir,
+        "--limit",
+        "1",
+        "--output",
+        "table",
+    ]);
+    assert_code(&table, 0);
+    let table = String::from_utf8(table.stdout).unwrap();
+    let lines: Vec<_> = table.lines().collect();
+    assert_eq!(lines.len(), 3, "{table}");
+    assert!(lines[0].contains("6 commands and 3 files"), "{table}");
+    assert!(
+        lines[2].contains("  Hot/Slow.lean:4  slow  ") && lines[2].ends_with("%"),
+        "{table}"
+    );
+    assert!(lines[2].contains("  decide 6:4-6:18 x1 "), "{table}");
+}
+
+#[test]
+fn hotspots_from_a_recording_follow_its_elapsed_times() {
+    let root = fixture("hotspots");
+    assert_code(&lake_build(&root), 0);
+    let profile = record(&root, 0);
+    let path = root.join("profile.json");
+    std::fs::write(&path, profile.to_string()).unwrap();
+    let uri = format!("file://{}", path.display());
+    let listing = hotspots(&["--profile", &uri, "--limit", "50"], 0);
+    pascal_case(&listing);
+    assert_eq!(listing["Detail"], "none");
+    let mut expected: Vec<_> = profile["Files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|file| {
+            file["Commands"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(move |command| {
+                    (
+                        command["ElapsedNs"].as_u64().unwrap(),
+                        file["Path"].as_str().unwrap().to_owned(),
+                        command["Key"].as_str().unwrap().to_owned(),
+                    )
+                })
+        })
+        .collect();
+    expected.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.cmp(&b.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+    let actual: Vec<_> = listing["Hotspots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            (
+                row["ElapsedNs"].as_u64().unwrap(),
+                row["Path"].as_str().unwrap().to_owned(),
+                row["Key"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(actual, expected);
+    assert_eq!(
+        listing["ElapsedNs"],
+        expected.iter().map(|row| row.0).sum::<u64>()
+    );
+    assert_shares(&listing);
+    for row in listing["Hotspots"].as_array().unwrap() {
+        assert!(row.get("Traced").is_none());
+        let command = profile["Files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|file| file["Path"] == row["Path"])
+            .flat_map(|file| file["Commands"].as_array().unwrap())
+            .find(|command| command["Key"] == row["Key"])
+            .unwrap();
+        assert_eq!(row["Heartbeats"], command["Heartbeats"]);
+        assert_eq!(row["Range"], command["Range"]);
+    }
+    let again = hotspots(&["--profile", &uri, "--limit", "50"], 0);
+    assert_eq!(again, listing);
+    for format in ["text", "table"] {
+        let output = cli(&[
+            "profile",
+            "list-hotspots",
+            "--profile",
+            &uri,
+            "--output",
+            format,
+        ]);
+        assert_code(&output, 0);
+        assert!(!output.stdout.is_empty());
+    }
+    let mut steps = profile.clone();
+    steps["Conditions"]["Detail"] = json!("steps");
+    for file in steps["Files"].as_array_mut().unwrap() {
+        for command in file["Commands"].as_array_mut().unwrap() {
+            command["Steps"] = json!([]);
+        }
+    }
+    let steps_path = root.join("steps.json");
+    std::fs::write(&steps_path, steps.to_string()).unwrap();
+    let output = cli(&[
+        "profile",
+        "list-hotspots",
+        "--profile",
+        &format!("file://{}", steps_path.display()),
+    ]);
+    assert_code(&output, 254);
+    assert!(output.stdout.is_empty());
+    let mut old = profile.clone();
+    old["SchemaVersion"] = json!(1);
+    let output = cli(&["profile", "list-hotspots", "--profile", &old.to_string()]);
+    assert_code(&output, 254);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("SchemaVersion=1"));
+    let dir = root.to_str().unwrap();
+    for args in [
+        vec![],
+        vec!["--project-dir", dir, "--profile", &uri],
+        vec!["--profile", &uri, "--detail", "steps"],
+        vec!["--profile", &uri, "--jobs", "2"],
+        vec!["--profile", &uri, "--paths", "Hot.lean"],
+        vec!["--profile", &uri, "--limit", "0"],
+        vec!["--project-dir", dir, "--detail", "unknown"],
+    ] {
+        let mut all = vec!["profile", "list-hotspots"];
+        all.extend(args);
+        assert_eq!(cli(&all).status.code(), Some(252), "{all:?}");
+    }
+    assert_code(&cli(&["profile", "list-hotspots", "help"]), 0);
+}
+
+#[test]
+fn hotspots_report_files_with_errors() {
+    let root = fixture("errors");
+    let listing = hotspots(
+        &["--project-dir", root.to_str().unwrap(), "--jobs", "4"],
+        254,
+    );
+    assert!(listing["FilesWithErrors"].as_u64().unwrap() > 0);
+    assert_shares(&listing);
 }

@@ -9,22 +9,36 @@ structure Request where
   arguments : Array String
   detail : String
   stepThresholdNs : Nat
+  captureThresholdMs : Nat
+  traceStarts : Option (Array (Nat × Nat))
   deriving FromJson
 
 def positionJson (p : Position) : Json :=
   Json.mkObj [("Line", toJson p.line), ("Column", toJson p.column)]
 
-def measurementOptions (steps : Bool) (opts : Options) : Options :=
+structure Tracing where
+  traced : Bool
+  selective : Bool
+  captureMs : Nat
+  deriving Inhabited
+
+def measurementOptions (tracing : Tracing) (opts : Options) : Options :=
   let opts := opts.setBool `Elab.async false
-  if steps then
-    opts.setBool `trace.profiler true |>.set `trace.profiler.threshold (0 : Nat)
+  if tracing.traced then
+    opts.setBool `trace.profiler true |>.set `trace.profiler.threshold tracing.captureMs
       |>.setBool `trace.profiler.useHeartbeats false |>.set `trace.profiler.output ""
+      |>.setBool `trace.Leanwake.tactic true
+  else if tracing.selective then
+    opts.setBool `trace.profiler false |>.setBool `trace.Leanwake.tactic false
   else opts
+
+initialize currentTracing : IO.Ref Tracing ←
+  IO.mkRef { traced := false, selective := false, captureMs := 0 }
 
 initialize wrappedCommands : SimpleScopedEnvExtension Name (PHashSet Name) ←
   registerSimpleScopedEnvExtension { initial := {}, addEntry := (·.insert ·) }
 
-def forceSynchronous (steps : Bool) (env : Environment) : Environment := Id.run do
+def forceSynchronous (env : Environment) : Environment := Id.run do
   let wrapped := wrappedCommands.getState env
   let mut names := wrapped
   let state := Command.commandElabAttribute.ext.getState env
@@ -35,12 +49,13 @@ def forceSynchronous (steps : Bool) (env : Environment) : Environment := Id.run 
       table.insert kind (entries.map fun entry =>
         if wrapped.contains entry.declName then entry else
           { entry with value := fun stx => do
+            let tracing ← currentTracing.get
             Command.modifyScope fun scope =>
-              { scope with opts := measurementOptions steps scope.opts }
+              { scope with opts := measurementOptions tracing scope.opts }
             try entry.value stx
             finally
               Command.modifyScope fun scope =>
-                { scope with opts := measurementOptions steps scope.opts } }) }
+                { scope with opts := measurementOptions tracing scope.opts } }) }
   return wrappedCommands.modifyState env fun _ => names
 
 def finishedSnapshots (tasks : Array (Language.SnapshotTask Language.SnapshotTree)) :
@@ -128,21 +143,20 @@ def collectNames (before after : Environment) : Array String := Id.run do
     else a.2.range.pos.line < b.2.range.pos.line || (a.2.range.pos.line == b.2.range.pos.line && a.2.range.pos.column < b.2.range.pos.column)
   return names.map (·.1.toString)
 
-def measureCommands (path input : String) (steps : Bool) (threshold : Nat) :
-    FrontendM (Array Json × Bool) := do
+def measureCommands (path input : String) (steps : Bool) (threshold : Nat) (captureMs : Nat)
+    (targets : Option (Array (Nat × Nat))) : FrontendM (Array Json × Bool) := do
   let mut rows := #[]
   let mut failed := false
+  let mut remaining := targets.map (·.size) |>.getD 0
   let mut occurrences : Std.HashMap (String × String) Nat := {}
   repeat
     modify fun s => { s with commandState := { s.commandState with
-      env := forceSynchronous steps s.commandState.env } }
+      env := forceSynchronous s.commandState.env } }
     if steps then
       modify fun s => { s with commandState := { s.commandState with
         env := instrumentTactics s.commandState.env } }
     modify fun s => { s with commandState := { s.commandState with
-      messages := {}, snapshotTasks := #[], traceState := {},
-      scopes := s.commandState.scopes.map fun scope =>
-        { scope with opts := measurementOptions steps scope.opts } } }
+      messages := {}, snapshotTasks := #[], traceState := {} } }
     updateCmdPos
     let cs ← getCommandState
     let ictx ← getInputContext
@@ -152,6 +166,13 @@ def measureCommands (path input : String) (steps : Bool) (threshold : Nat) :
     let (cmd, ps, messages) := Parser.parseCommand ictx pmctx ps cs.messages
     setParserState ps
     setMessages messages
+    let position := ictx.fileMap.toPosition (cmd.getPos?.getD ps.pos)
+    let traced := steps && targets.all (·.contains (position.line, position.column))
+    let tracing : Tracing := { traced, selective := targets.isSome, captureMs }
+    currentTracing.set tracing
+    modify fun s => { s with commandState := { s.commandState with
+      scopes := s.commandState.scopes.map fun scope =>
+        { scope with opts := measurementOptions tracing scope.opts } } }
     let previousCommands := (← get).commands
     modify fun s => { s with commands := s.commands.push cmd }
     let h0 ← IO.getNumHeartbeats
@@ -162,12 +183,12 @@ def measureCommands (path input : String) (steps : Bool) (threshold : Nat) :
     let state ← getCommandState
     let (snapshots, unfinished) ← finishedSnapshots state.snapshotTasks
     let mut diagnostics := messages ++ state.messages
-    let mut traces := if steps then stateSteps ictx.fileMap threshold state.traceState else #[]
+    let mut traces := if traced then stateSteps ictx.fileMap threshold state.traceState else #[]
     for snapshot in snapshots do
       diagnostics := diagnostics ++ snapshot.diagnostics.msgLog
-      if steps then traces := traces ++ stateSteps ictx.fileMap threshold snapshot.traces
+      if traced then traces := traces ++ stateSteps ictx.fileMap threshold snapshot.traces
     if unfinished then
-      IO.eprintln s!"{path}:{ictx.fileMap.toPosition (cmd.getPos?.getD ps.pos)}: unfinished elaboration task; synchronous measurement cannot be guaranteed"
+      IO.eprintln s!"{path}:{position}: unfinished elaboration task; synchronous measurement cannot be guaranteed"
     let hasErrors := diagnostics.hasErrors || unfinished
     failed := failed || hasErrors
     for message in diagnostics.toList do IO.eprintln (← message.toString)
@@ -187,8 +208,12 @@ def measureCommands (path input : String) (steps : Bool) (threshold : Nat) :
         ("End", positionJson (ictx.fileMap.toPosition stop))]),
       ("Heartbeats", toJson (h1 - h0)), ("ElapsedNs", toJson (t1 - t0)),
       ("HasErrors", toJson hasErrors)]
-    rows := rows.push <| Json.mkObj (if steps then fields ++ [("Steps", toJson traces)] else fields)
-    if unfinished || Parser.isTerminalCommand cmd then break
+    if traced then
+      rows := rows.push <| Json.mkObj (fields ++ [("Steps", toJson traces)])
+      remaining := remaining - 1
+    else if targets.isNone then
+      rows := rows.push <| Json.mkObj fields
+    if unfinished || Parser.isTerminalCommand cmd || (targets.isSome && remaining == 0) then break
   return (rows, failed)
 
 def setConfigOption (opts : Options) (arg : String) : IO Options := do
@@ -228,14 +253,21 @@ unsafe def profile (req : Request) : IO Json := do
     (arts := req.setup.importArts) (headerStx? := header)
   let stop ← IO.monoNanosNow
   opts ← Language.Lean.reparseOptions opts
-  opts := measurementOptions steps opts
+  if req.traceStarts.isSome && !steps then
+    throw <| IO.userError "traceStarts requires detail steps"
+  let tracing : Tracing := {
+    traced := steps && req.traceStarts.isNone
+    selective := req.traceStarts.isSome
+    captureMs := req.captureThresholdMs }
+  opts := measurementOptions tracing opts
   let (commands, failed) ← if messages.hasErrors then do
       for message in messages.toList do IO.eprintln (← message.toString)
       pure (#[], true)
     else do
-      let (result, _) ← (measureCommands req.path input steps req.stepThresholdNs).run
+      let (result, _) ← (measureCommands req.path input steps req.stepThresholdNs
+        req.captureThresholdMs req.traceStarts).run
         { inputCtx := ictx } |>.run {
-        commandState := Command.mkState (forceSynchronous steps env) messages opts,
+        commandState := Command.mkState (forceSynchronous env) messages opts,
         parserState := ps, cmdPos := ps.pos }
       pure result
   return Json.mkObj [("Path", toJson req.path), ("Module", toJson req.setup.name.toString),

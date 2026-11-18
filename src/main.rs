@@ -1,6 +1,7 @@
 mod cli;
 mod compare;
 mod error;
+mod hotspots;
 mod json_io;
 mod model;
 mod process;
@@ -81,6 +82,7 @@ fn run(cli: Cli) -> Result<u8> {
     process::DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
     let Command::Profile { command } = cli.command;
     match command {
+        ProfileCommand::ListHotspots(options) => hotspots::run(options, cli.output),
         ProfileCommand::ListSteps {
             profile,
             path,
@@ -89,7 +91,7 @@ fn run(cli: Cli) -> Result<u8> {
         } => steps::run(&load_profile(&profile)?, &path, &key, limit, cli.output),
         ProfileCommand::CompareProfiles(options) => compare::run(options, cli.output),
         ProfileCommand::RecordProfile(options) => {
-            let profile = project::record(&options)?;
+            let profile = project::record(&options, None)?;
             let failed = profile.files.iter().any(|file| file.has_errors);
             if let Some(path) = &options.output_file {
                 json_io::write(

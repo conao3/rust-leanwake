@@ -5,7 +5,7 @@ use crate::process;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{
@@ -193,6 +193,7 @@ fn measure(
     environment: &HashMap<String, String>,
     file: &Prepared,
     options: &Record,
+    targets: Option<&Targets>,
 ) -> Result<File> {
     let Some(setup) = &file.setup else {
         return Ok(File {
@@ -204,8 +205,17 @@ fn measure(
             commands: Vec::new(),
         });
     };
+    let starts = targets
+        .map(|targets| {
+            targets
+                .get(&file.path)
+                .ok_or_else(|| Error::internal(format!("no traced commands for {}", file.path)))
+        })
+        .transpose()?;
     let request = json!({"path": file.path, "setup": setup, "arguments": file.metadata.arguments,
-        "detail": options.detail.as_str(), "stepThresholdNs": options.step_threshold_ns});
+        "detail": options.detail.as_str(), "stepThresholdNs": options.step_threshold_ns,
+        "captureThresholdMs": options.capture_threshold_ms,
+        "traceStarts": starts});
     let mut input = serde_json::to_vec(&request)?;
     input.push(b'\n');
     let output = process::run(
@@ -236,7 +246,9 @@ fn measure(
     Ok(measured)
 }
 
-pub fn record(options: &Record) -> Result<Profile> {
+pub type Targets = BTreeMap<String, Vec<(u64, u64)>>;
+
+pub fn record(options: &Record, targets: Option<&Targets>) -> Result<Profile> {
     let root = options
         .project_dir
         .canonicalize()
@@ -271,7 +283,7 @@ pub fn record(options: &Record) -> Result<Profile> {
                     let Some(file) = files.get(index) else {
                         break;
                     };
-                    let result = measure(&root, &adapter, &environment, file, options);
+                    let result = measure(&root, &adapter, &environment, file, options, targets);
                     results.lock().unwrap().push((index, result));
                 }
             });
