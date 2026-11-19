@@ -1,0 +1,725 @@
+{
+  "SchemaVersion": 1,
+  "Files": [
+    {
+      "Path": "Mathlib/Algebra/Group/End.lean",
+      "FirstError": {
+        "Key": "Equiv.Perm.subtypePerm_inv",
+        "Range": {
+          "Start": {
+            "Line": 391,
+            "Column": 0
+          },
+          "End": {
+            "Line": 396,
+            "Column": 5
+          }
+        }
+      },
+      "ErroredCommands": 4,
+      "RecordedCommands": 189
+    },
+    {
+      "Path": "Mathlib/Algebra/Homology/DerivedCategory/Ext/ExtClass.lean",
+      "FirstError": {
+        "Key": "CategoryTheory.ShortComplex.ShortExact.extClass",
+        "Range": {
+          "Start": {
+            "Line": 74,
+            "Column": 0
+          },
+          "End": {
+            "Line": 82,
+            "Column": 56
+          }
+        }
+      },
+      "ErroredCommands": 7,
+      "RecordedCommands": 35
+    },
+    {
+      "Path": "Mathlib/Algebra/Lie/BaseChange.lean",
+      "FirstError": {
+        "Key": "LieAlgebra.ExtendScalars.instLieRing",
+        "Range": {
+          "Start": {
+            "Line": 98,
+            "Column": 0
+          },
+          "End": {
+            "Line": 104,
+            "Column": 44
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 45
+    },
+    {
+      "Path": "Mathlib/Algebra/Lie/Weights/RootSystem.lean",
+      "FirstError": {
+        "Key": "LieAlgebra.IsKilling.chainLength",
+        "Range": {
+          "Start": {
+            "Line": 64,
+            "Column": 0
+          },
+          "End": {
+            "Line": 70,
+            "Column": 79
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 53
+    },
+    {
+      "Path": "Mathlib/Algebra/Module/Injective.lean",
+      "FirstError": {
+        "Key": "Module.Baer.ExtensionOfMaxAdjoin.fst",
+        "Range": {
+          "Start": {
+            "Line": 238,
+            "Column": 0
+          },
+          "End": {
+            "Line": 243,
+            "Column": 41
+          }
+        }
+      },
+      "ErroredCommands": 3,
+      "RecordedCommands": 75
+    },
+    {
+      "Path": "Mathlib/Algebra/Polynomial/Identities.lean",
+      "FirstError": {
+        "Key": "Polynomial.binomExpansion",
+        "Range": {
+          "Start": {
+            "Line": 75,
+            "Column": 0
+          },
+          "End": {
+            "Line": 89,
+            "Column": 34
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 17
+    },
+    {
+      "Path": "Mathlib/AlgebraicTopology/FundamentalGroupoid/InducedMaps.lean",
+      "FirstError": {
+        "Key": "ContinuousMap.Homotopy.eq_path_of_eq_image",
+        "Range": {
+          "Start": {
+            "Line": 156,
+            "Column": 0
+          },
+          "End": {
+            "Line": 166,
+            "Column": 32
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 46
+    },
+    {
+      "Path": "Mathlib/AlgebraicTopology/SimplicialSet/HomotopyCat.lean",
+      "FirstError": {
+        "Key": "SSet.Truncated.ev12\u2082",
+        "Range": {
+          "Start": {
+            "Line": 188,
+            "Column": 0
+          },
+          "End": {
+            "Line": 196,
+            "Column": 24
+          }
+        }
+      },
+      "ErroredCommands": 3,
+      "RecordedCommands": 131
+    },
+    {
+      "Path": "Mathlib/Analysis/InnerProductSpace/TensorProduct.lean",
+      "FirstError": {
+        "Key": "TensorProduct.instNormedAddCommGroup",
+        "Range": {
+          "Start": {
+            "Line": 133,
+            "Column": 0
+          },
+          "End": {
+            "Line": 144,
+            "Column": 27
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 218
+    },
+    {
+      "Path": "Mathlib/Analysis/Normed/Lp/PiLp.lean",
+      "FirstError": {
+        "Key": "PiLp.instPseudoEMetricSpace",
+        "Range": {
+          "Start": {
+            "Line": 603,
+            "Column": 0
+          },
+          "End": {
+            "Line": 608,
+            "Column": 68
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 273
+    },
+    {
+      "Path": "Mathlib/Analysis/Normed/Lp/ProdLp.lean",
+      "FirstError": {
+        "Key": "WithLp.instProdPseudoEMetricSpace",
+        "Range": {
+          "Start": {
+            "Line": 580,
+            "Column": 0
+          },
+          "End": {
+            "Line": 586,
+            "Column": 81
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 267
+    },
+    {
+      "Path": "Mathlib/Analysis/Normed/Module/Seminorm/Basic.lean",
+      "FirstError": {
+        "Key": "Seminorm.instConditionallyCompleteLattice",
+        "Range": {
+          "Start": {
+            "Line": 570,
+            "Column": 0
+          },
+          "End": {
+            "Line": 581,
+            "Column": 80
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 275
+    },
+    {
+      "Path": "Mathlib/Analysis/Normed/Operator/Basic.lean",
+      "FirstError": {
+        "Key": "ContinuousLinearMap.toPseudoMetricSpace",
+        "Range": {
+          "Start": {
+            "Line": 380,
+            "Column": 0
+          },
+          "End": {
+            "Line": 383,
+            "Column": 98
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 118
+    },
+    {
+      "Path": "Mathlib/CategoryTheory/Preadditive/CommGrp_.lean",
+      "FirstError": {
+        "Key": "CategoryTheory.Preadditive.commGrpEquivalenceAux",
+        "Range": {
+          "Start": {
+            "Line": 62,
+            "Column": 0
+          },
+          "End": {
+            "Line": 82,
+            "Column": 13
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 14
+    },
+    {
+      "Path": "Mathlib/Combinatorics/Colex.lean",
+      "FirstError": {
+        "Key": "Finset.Colex.le_iff_max'_mem",
+        "Range": {
+          "Start": {
+            "Line": 309,
+            "Column": 0
+          },
+          "End": {
+            "Line": 313,
+            "Column": 33
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 98
+    },
+    {
+      "Path": "Mathlib/Combinatorics/Matroid/Basic.lean",
+      "FirstError": {
+        "Key": "Matroid.diff_subset_ground",
+        "Range": {
+          "Start": {
+            "Line": 354,
+            "Column": 0
+          },
+          "End": {
+            "Line": 354,
+            "Column": 85
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 222
+    },
+    {
+      "Path": "Mathlib/Combinatorics/SetFamily/AhlswedeZhang.lean",
+      "FirstError": {
+        "Key": "Finset.truncatedSup",
+        "Range": {
+          "Start": {
+            "Line": 122,
+            "Column": 0
+          },
+          "End": {
+            "Line": 126,
+            "Column": 75
+          }
+        }
+      },
+      "ErroredCommands": 4,
+      "RecordedCommands": 84
+    },
+    {
+      "Path": "Mathlib/Combinatorics/SimpleGraph/Copy.lean",
+      "FirstError": {
+        "Key": "SimpleGraph.definition._@.Mathlib.Combinatorics.SimpleGraph.Copy.3082331781._hygCtx._hyg.14",
+        "Range": {
+          "Start": {
+            "Line": 598,
+            "Column": 0
+          },
+          "End": {
+            "Line": 608,
+            "Column": 95
+          }
+        }
+      },
+      "ErroredCommands": 10,
+      "RecordedCommands": 154
+    },
+    {
+      "Path": "Mathlib/Computability/Primrec/List.lean",
+      "FirstError": {
+        "Key": "Primcodable.list",
+        "Range": {
+          "Start": {
+            "Line": 106,
+            "Column": 0
+          },
+          "End": {
+            "Line": 134,
+            "Column": 68
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 145
+    },
+    {
+      "Path": "Mathlib/Data/Finset/Union.lean",
+      "FirstError": {
+        "Key": "Finset.disjiUnion_filter_eq",
+        "Range": {
+          "Start": {
+            "Line": 104,
+            "Column": 0
+          },
+          "End": {
+            "Line": 109,
+            "Column": 38
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 72
+    },
+    {
+      "Path": "Mathlib/FieldTheory/PerfectClosure.lean",
+      "FirstError": {
+        "Key": "PerfectClosure.instMul",
+        "Range": {
+          "Start": {
+            "Line": 136,
+            "Column": 0
+          },
+          "End": {
+            "Line": 146,
+            "Column": 77
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 67
+    },
+    {
+      "Path": "Mathlib/GroupTheory/DivisibleHull.lean",
+      "FirstError": {
+        "Key": "DivisibleHull.instLE",
+        "Range": {
+          "Start": {
+            "Line": 266,
+            "Column": 0
+          },
+          "End": {
+            "Line": 269,
+            "Column": 70
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 66
+    },
+    {
+      "Path": "Mathlib/LinearAlgebra/CliffordAlgebra/Even.lean",
+      "FirstError": {
+        "Key": "CliffordAlgebra.even.lift.aux",
+        "Range": {
+          "Start": {
+            "Line": 191,
+            "Column": 0
+          },
+          "End": {
+            "Line": 198,
+            "Column": 71
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 37
+    },
+    {
+      "Path": "Mathlib/LinearAlgebra/Dual/BaseChange.lean",
+      "FirstError": {
+        "Key": "IsBaseChange.toDualBaseChange",
+        "Range": {
+          "Start": {
+            "Line": 104,
+            "Column": 0
+          },
+          "End": {
+            "Line": 125,
+            "Column": 43
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 24
+    },
+    {
+      "Path": "Mathlib/LinearAlgebra/LinearPMap.lean",
+      "FirstError": {
+        "Key": "LinearPMap.sup",
+        "Range": {
+          "Start": {
+            "Line": 339,
+            "Column": 0
+          },
+          "End": {
+            "Line": 346,
+            "Column": 39
+          }
+        }
+      },
+      "ErroredCommands": 17,
+      "RecordedCommands": 198
+    },
+    {
+      "Path": "Mathlib/LinearAlgebra/RootSystem/Basic.lean",
+      "FirstError": {
+        "Key": "RootPairing.equiv_of_mapsTo",
+        "Range": {
+          "Start": {
+            "Line": 68,
+            "Column": 0
+          },
+          "End": {
+            "Line": 77,
+            "Column": 66
+          }
+        }
+      },
+      "ErroredCommands": 4,
+      "RecordedCommands": 32
+    },
+    {
+      "Path": "Mathlib/ModelTheory/Algebra/Ring/FreeCommRing.lean",
+      "FirstError": {
+        "Key": "FirstOrder.Ring.termOfFreeCommRing",
+        "Range": {
+          "Start": {
+            "Line": 49,
+            "Column": 0
+          },
+          "End": {
+            "Line": 53,
+            "Column": 58
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 15
+    },
+    {
+      "Path": "Mathlib/NumberTheory/LegendreSymbol/JacobiSymbol.lean",
+      "FirstError": {
+        "Key": "_private.Mathlib.NumberTheory.LegendreSymbol.JacobiSymbol.0.fastJacobiSym.eq",
+        "Range": {
+          "Start": {
+            "Line": 568,
+            "Column": 0
+          },
+          "End": {
+            "Line": 590,
+            "Column": 73
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 84
+    },
+    {
+      "Path": "Mathlib/NumberTheory/ModularForms/SlashActions.lean",
+      "FirstError": {
+        "Key": "ModularForm.instSlashActionIntGeneralLinearGroupFinOfNatNatRealForallUpperHalfPlaneComplex",
+        "Range": {
+          "Start": {
+            "Line": 126,
+            "Column": 0
+          },
+          "End": {
+            "Line": 134,
+            "Column": 24
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 44
+    },
+    {
+      "Path": "Mathlib/Order/BooleanAlgebra/Basic.lean",
+      "FirstError": {
+        "Key": "GeneralizedBooleanAlgebra.toGeneralizedCoheytingAlgebra",
+        "Range": {
+          "Start": {
+            "Line": 122,
+            "Column": 0
+          },
+          "End": {
+            "Line": 143,
+            "Column": 71
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 135
+    },
+    {
+      "Path": "Mathlib/RingTheory/Coalgebra/TensorProduct.lean",
+      "FirstError": {
+        "Key": "TensorProduct.instCoalgebra",
+        "Range": {
+          "Start": {
+            "Line": 122,
+            "Column": 0
+          },
+          "End": {
+            "Line": 155,
+            "Column": 26
+          }
+        }
+      },
+      "ErroredCommands": 2,
+      "RecordedCommands": 62
+    },
+    {
+      "Path": "Mathlib/RingTheory/DividedPowers/Padic.lean",
+      "FirstError": {
+        "Key": "PadicInt.dividedPowers",
+        "Range": {
+          "Start": {
+            "Line": 134,
+            "Column": 0
+          },
+          "End": {
+            "Line": 150,
+            "Column": 39
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 21
+    },
+    {
+      "Path": "Mathlib/RingTheory/DividedPowers/SubDPIdeal.lean",
+      "FirstError": {
+        "Key": "DividedPowers.Quotient.dividedPowers",
+        "Range": {
+          "Start": {
+            "Line": 645,
+            "Column": 0
+          },
+          "End": {
+            "Line": 651,
+            "Column": 70
+          }
+        }
+      },
+      "ErroredCommands": 4,
+      "RecordedCommands": 107
+    },
+    {
+      "Path": "Mathlib/RingTheory/PicardGroup.lean",
+      "FirstError": {
+        "Key": "Submodule.tensorEquivMul",
+        "Range": {
+          "Start": {
+            "Line": 703,
+            "Column": 0
+          },
+          "End": {
+            "Line": 713,
+            "Column": 19
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 200
+    },
+    {
+      "Path": "Mathlib/RingTheory/WittVector/Basic.lean",
+      "FirstError": {
+        "Key": "WittVector.ghostMap",
+        "Range": {
+          "Start": {
+            "Line": 283,
+            "Column": 0
+          },
+          "End": {
+            "Line": 292,
+            "Column": 26
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 80
+    },
+    {
+      "Path": "Mathlib/Topology/ExtremallyDisconnected.lean",
+      "FirstError": {
+        "Key": "ExtremallyDisconnected.homeoCompactToT2",
+        "Range": {
+          "Start": {
+            "Line": 242,
+            "Column": 0
+          },
+          "End": {
+            "Line": 251,
+            "Column": 93
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 32
+    },
+    {
+      "Path": "Mathlib/Topology/MetricSpace/GromovHausdorff.lean",
+      "FirstError": {
+        "Key": "GromovHausdorff.IsometryRel.setoid",
+        "Range": {
+          "Start": {
+            "Line": 79,
+            "Column": 0
+          },
+          "End": {
+            "Line": 83,
+            "Column": 47
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 61
+    },
+    {
+      "Path": "Mathlib/Topology/MetricSpace/GromovHausdorffRealized.lean",
+      "FirstError": {
+        "Key": "GromovHausdorff.candidatesBOfCandidates",
+        "Range": {
+          "Start": {
+            "Line": 376,
+            "Column": 0
+          },
+          "End": {
+            "Line": 380,
+            "Column": 81
+          }
+        }
+      },
+      "ErroredCommands": 5,
+      "RecordedCommands": 76
+    },
+    {
+      "Path": "Mathlib/Topology/MetricSpace/Pseudo/Defs.lean",
+      "FirstError": {
+        "Key": "PseudoMetricSpace",
+        "Range": {
+          "Start": {
+            "Line": 121,
+            "Column": 0
+          },
+          "End": {
+            "Line": 151,
+            "Column": 71
+          }
+        }
+      },
+      "ErroredCommands": 26,
+      "RecordedCommands": 272
+    },
+    {
+      "Path": "Mathlib/Topology/UnitInterval.lean",
+      "FirstError": {
+        "Key": "Set.Icc.eq_convexComb",
+        "Range": {
+          "Start": {
+            "Line": 449,
+            "Column": 0
+          },
+          "End": {
+            "Line": 466,
+            "Column": 11
+          }
+        }
+      },
+      "ErroredCommands": 1,
+      "RecordedCommands": 129
+    }
+  ]
+}

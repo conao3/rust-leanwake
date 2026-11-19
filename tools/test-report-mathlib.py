@@ -8,7 +8,11 @@ import unittest
 from pathlib import Path
 
 script = Path(__file__).with_name("report-mathlib.py")
-render = runpy.run_path(str(script))["render"]
+module = runpy.run_path(str(script))
+
+
+def render(hotspots, metadata, profile):
+    return module["render"](hotspots, metadata, module["summarize_errors"](profile))
 
 
 class ReportTests(unittest.TestCase):
@@ -125,6 +129,8 @@ class ReportTests(unittest.TestCase):
                 command, capture_output=True, text=True, check=False
             )
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((work / "errors.json").exists())
+            (work / "profile.json").unlink()
             result = subprocess.run(
                 [*command, "--check"], capture_output=True, text=True, check=False
             )
@@ -199,6 +205,53 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertIn("profile.json", result.stderr)
             self.assertFalse((work / "README.md").exists())
+
+    def test_compact_summary(self):
+        self.profile["Files"] = [
+            {
+                "Path": "Mathlib/A.lean",
+                "HasErrors": True,
+                "Commands": [
+                    {
+                        "Key": "bad",
+                        "HasErrors": True,
+                        "Range": self.position,
+                        "Steps": ["not retained"],
+                    }
+                ],
+            }
+        ]
+        summary = module["summarize_errors"](self.profile)
+        self.assertEqual(summary["Files"][0]["ErroredCommands"], 1)
+        self.assertEqual(summary["Files"][0]["RecordedCommands"], 1)
+        self.assertNotIn("Steps", json.dumps(summary))
+        self.assertEqual(
+            render(self.hotspots, self.metadata, self.profile),
+            module["render"](self.hotspots, self.metadata, summary),
+        )
+        with self.assertRaisesRegex(ValueError, "SchemaVersion"):
+            module["render"](
+                self.hotspots, self.metadata, {**summary, "SchemaVersion": 99}
+            )
+
+    def test_check_requires_summary_without_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            for name, data in [
+                ("hotspots", self.hotspots),
+                ("metadata", self.metadata),
+                ("profile", self.profile),
+            ]:
+                (work / (name + ".json")).write_text(json.dumps(data))
+            result = subprocess.run(
+                [sys.executable, str(script), "--input-dir", str(work), "--check"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("errors.json", result.stderr)
+            self.assertFalse((work / "errors.json").exists())
 
 
 if __name__ == "__main__":

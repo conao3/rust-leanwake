@@ -40,7 +40,30 @@ def inside_key(entry):
     )
 
 
-def render(hotspots, metadata, profile):
+def summarize_errors(profile):
+    files = []
+    for file in sorted(profile["Files"], key=lambda file: file["Path"]):
+        if not file["HasErrors"]:
+            continue
+        commands = file.get("Commands")
+        errors = [command for command in commands or [] if command["HasErrors"]]
+        first = errors[0] if errors else None
+        files.append(
+            {
+                "Path": file["Path"],
+                "FirstError": {"Key": first["Key"], "Range": first.get("Range")}
+                if first
+                else None,
+                "ErroredCommands": len(errors) if commands is not None else None,
+                "RecordedCommands": len(commands) if commands is not None else None,
+            }
+        )
+    return {"SchemaVersion": 1, "Files": files}
+
+
+def render(hotspots, metadata, error_summary):
+    if error_summary["SchemaVersion"] != 1:
+        raise ValueError("unsupported error summary SchemaVersion")
     listed = sorted(
         hotspots["Hotspots"],
         key=lambda entry: (-entry["ElapsedNs"], entry["Path"], entry["Key"]),
@@ -104,20 +127,16 @@ def render(hotspots, metadata, profile):
         )
     ]
     error_rows = []
-    for file in sorted(profile["Files"], key=lambda file: file["Path"]):
-        if not file["HasErrors"]:
-            continue
-        commands = file.get("Commands")
-        errors = [command for command in commands or [] if command["HasErrors"]]
-        first = errors[0] if errors else None
+    for file in sorted(error_summary["Files"], key=lambda file: file["Path"]):
+        first = file["FirstError"]
         position = first.get("Range") if first else None
         location = f" (line {position['Start']['Line']})" if position else ""
         error_rows.append(
             [
                 file["Path"],
                 f"{first['Key']}{location}" if first else "unavailable",
-                f"{len(errors)}/{len(commands)}"
-                if commands is not None
+                f"{file['ErroredCommands']}/{file['RecordedCommands']}"
+                if file["RecordedCommands"] is not None
                 else "unavailable",
             ]
         )
@@ -152,7 +171,7 @@ def render(hotspots, metadata, profile):
             else "No files with errors in the untraced recording."
         ),
         "",
-        "Counts are errored commands / recorded commands from profile.json, not diagnostic counts.",
+        "Counts are errored commands / recorded commands in errors.json, derived from profile.json, not diagnostic counts.",
         "",
         *table(
             ["Path", "First errored command", "Errored / recorded commands"], error_rows
@@ -204,13 +223,24 @@ def main():
     parser.add_argument("--input-dir", type=Path, default=default)
     parser.add_argument("--output-dir", type=Path, default=default)
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--summarize-profile", type=Path)
     args = parser.parse_args()
+    if args.check and args.summarize_profile:
+        parser.error("--check cannot be combined with --summarize-profile")
     target = args.output_dir / "README.md"
     try:
         hotspots = json.loads((args.input_dir / "hotspots.json").read_text())
         metadata = json.loads((args.input_dir / "metadata.json").read_text())
-        profile = json.loads((args.input_dir / "profile.json").read_text())
-        result = render(hotspots, metadata, profile).encode()
+        errors = args.input_dir / "errors.json"
+        source = args.summarize_profile or args.input_dir / "profile.json"
+        if not args.check and (
+            args.summarize_profile or source.exists() or not errors.exists()
+        ):
+            summary = summarize_errors(json.loads(source.read_text()))
+            errors.write_text(json.dumps(summary, indent=2) + "\n")
+        else:
+            summary = json.loads(errors.read_text())
+        result = render(hotspots, metadata, summary).encode()
         if args.check:
             if target.read_bytes() != result:
                 parser.exit(1, f"Report differs: {target}\n")
