@@ -89,6 +89,24 @@ Options:
 
 Give at least one of `--project-dir` and `--profile`; otherwise the exit code is 252. Together they require `--detail steps` (the default). Files with errors are reported on standard error, counted in `FilesWithErrors` and make the exit code 254, as does an error that appears only in the traced pass (tracing raises heartbeats, so a proof close to `maxHeartbeats` can fail there); the listing is still printed. Traced rows match by path and command start after checking the source hash. An errored traced command may lack the original declaration name; the listing retains the untraced key, name and ranking and marks `Traced.HasErrors=true`. Changed source and different keys on error-free traced commands are rejected.
 
+### Mathlib checkpoints
+
+`python3 tools/profile-mathlib.py --work-dir ~/work --output-dir ~/work/mathlib-hotspots`
+uses the pinned Mathlib checkout and official elan toolchain. It saves the untraced
+recording as `profile.json` before producing `hotspots.json` from checkpoint tracing.
+Both phases share `stderr.log`; `metadata.json` records `RecordWallSeconds`,
+`RecordExitCode`, `TraceWallSeconds` and `TraceExitCode`, as well as overall timing
+and status. A recording exit of 254 still proceeds to tracing; other failures stop
+before tracing, leaving its metadata fields null. The checkpoint and recording
+metadata remain available even if tracing fails. With the same official toolchain
+environment, retry only tracing with:
+
+```sh
+target/debug/leanwake profile list-hotspots \
+  --profile file://$HOME/work/mathlib-hotspots/profile.json \
+  --project-dir "$HOME/work/mathlib4" --jobs 4 --limit 50 --output json
+```
+
 ## Record and inspect
 
 `record-profile` writes the untraced measurement as a JSON profile that `list-hotspots --profile`, `list-commands`, `list-files` and `compare-profiles` read. The examples below use `tests/fixtures/steps`.

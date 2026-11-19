@@ -18,6 +18,81 @@ def utc_now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def measure(command, project, output, metadata, env, paths, limit, jobs):
+    start = time.monotonic()
+    metadata.update(
+        {
+            "RecordWallSeconds": None,
+            "RecordExitCode": None,
+            "TraceWallSeconds": None,
+            "TraceExitCode": None,
+        }
+    )
+    phases = [
+        (
+            "Record",
+            "profile.json",
+            [
+                *command,
+                "record-profile",
+                "--output",
+                "json",
+                "--jobs",
+                str(jobs),
+                "--project-dir",
+                str(project),
+                *(["--paths", *paths] if paths else []),
+            ],
+        ),
+        (
+            "Trace",
+            "hotspots.json",
+            [
+                *command,
+                "list-hotspots",
+                "--jobs",
+                str(jobs),
+                "--output",
+                "json",
+                "--profile",
+                "file://" + str(output / "profile.json"),
+                "--project-dir",
+                str(project),
+                "--limit",
+                str(limit),
+            ],
+        ),
+    ]
+    code = 0
+    (output / "hotspots.json").write_text("")
+    with (output / "stderr.log").open("w") as stderr:
+        for phase, filename, args in phases:
+            print("Running:", " ".join(args), flush=True)
+            phase_start = time.monotonic()
+            with (output / filename).open("w") as stdout:
+                result = subprocess.run(
+                    args, env=env, stdout=stdout, stderr=stderr, check=False
+                )
+            metadata[phase + "WallSeconds"] = time.monotonic() - phase_start
+            metadata[phase + "ExitCode"] = result.returncode
+            code = (
+                result.returncode
+                if result.returncode not in (0, 254)
+                else max(code, result.returncode)
+            )
+            metadata.update(
+                {
+                    "EndUtc": utc_now(),
+                    "WallSeconds": time.monotonic() - start,
+                    "ExitCode": code,
+                }
+            )
+            (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
+            if result.returncode not in (0, 254):
+                break
+    return code
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Measure pinned Mathlib hotspots with the official Lean release"
@@ -82,18 +157,7 @@ def main():
     command = [
         str(root / "target/debug/leanwake"),
         "profile",
-        "list-hotspots",
-        "--project-dir",
-        str(project),
-        "--jobs",
-        str(args.jobs),
-        "--limit",
-        str(args.limit),
-        "--output",
-        "json",
     ]
-    if args.paths:
-        command.extend(["--paths", *args.paths])
     cpu_model = next(
         (
             line.split(":", 1)[1].strip()
@@ -113,25 +177,11 @@ def main():
         "Nproc": int(capture(["nproc"])),
         "StartUtc": utc_now(),
     }
-    print("Running:", " ".join(command), flush=True)
-    start = time.monotonic()
-    with (
-        (output / "hotspots.json").open("w") as stdout,
-        (output / "stderr.log").open("w") as stderr,
-    ):
-        result = subprocess.run(
-            command, cwd=root, env=env, stdout=stdout, stderr=stderr, check=False
-        )
-    metadata.update(
-        {
-            "EndUtc": utc_now(),
-            "WallSeconds": time.monotonic() - start,
-            "ExitCode": result.returncode,
-        }
+    code = measure(
+        command, project, output, metadata, env, args.paths, args.limit, args.jobs
     )
-    (output / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
     print(json.dumps(metadata, indent=2), flush=True)
-    return result.returncode
+    return code
 
 
 if __name__ == "__main__":

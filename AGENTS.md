@@ -38,6 +38,7 @@ for Cargo and GitHub Actions.
 - `audit/`: leanassay mutation checks for the generated functions called by Rust.
 - `tools/check-format.py`: tracked-file formatting with isolated Git configuration.
 - `tools/check-package.py`: installed wrapper, plugin compiler, local Git dependency and PATH priority.
+- `tools/profile-mathlib.py` and `tools/test-profile-mathlib.py`: pinned official-toolchain Mathlib recording, checkpoints and per-phase measurement metadata.
 - `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
 - `native/Main.lean`: synchronous elaboration, per-command tracing, ranges, names and measurements.
 - `native/Sha256.lean`: SHA-256 for source identity and unnamed command keys.
