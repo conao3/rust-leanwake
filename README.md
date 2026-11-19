@@ -107,6 +107,13 @@ target/debug/leanwake profile list-hotspots \
   --project-dir "$HOME/work/mathlib4" --jobs 4 --limit 50 --output json
 ```
 
+Generate the Markdown report with
+`python3 tools/report-mathlib.py --input-dir ~/work/mathlib-hotspots --output-dir ~/work/mathlib-hotspots`.
+It reads `profile.json`, `hotspots.json` and `metadata.json`, including both measurement phases.
+Lean 4.35.0's synchronous elaboration fails on some Mathlib files that Lake builds cleanly
+(also reproducible with plain `lean -DElab.async=false --setup ...`). Their commands
+after the failure are missing or errored; the report lists affected files and counts.
+
 ## Record and inspect
 
 `record-profile` writes the untraced measurement as a JSON profile that `list-hotspots --profile`, `list-commands`, `list-files` and `compare-profiles` read. The examples below use `tests/fixtures/steps`.

@@ -39,6 +39,7 @@ for Cargo and GitHub Actions.
 - `tools/check-format.py`: tracked-file formatting with isolated Git configuration.
 - `tools/check-package.py`: installed wrapper, plugin compiler, local Git dependency and PATH priority.
 - `tools/profile-mathlib.py` and `tools/test-profile-mathlib.py`: pinned official-toolchain Mathlib recording, checkpoints and per-phase measurement metadata.
+- `tools/report-mathlib.py` and `tools/test-report-mathlib.py`: deterministic Mathlib reports, phase metadata and synchronous-error file coverage.
 - `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
 - `native/Main.lean`: synchronous elaboration, per-command tracing, ranges, names and measurements.
 - `native/Sha256.lean`: SHA-256 for source identity and unnamed command keys.
@@ -197,6 +198,12 @@ Unsupported toolchains and unsupported compiler arguments fail rather
 than silently changing the execution conditions.
 
 ## Repeatability evidence
+
+Official Lean 4.35.0 has synchronous private-name export failures reproducible with
+plain `lean -DElab.async=false --setup ...`; Lake's default asynchronous builds of
+the same Mathlib files succeed. Do not work around this in the adapter or change
+the pinned toolchain. Mathlib reports list errored files from the untraced checkpoint
+and warn that commands after failures may be missing or errored.
 
 On 2026-11-17, two recordings with `--jobs 4` on four Linux CPU cores measured
 61 files and 967 commands in lean-ritsuryo, and 30 files and 253 commands in
