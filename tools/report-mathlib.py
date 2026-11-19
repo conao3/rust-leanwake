@@ -41,6 +41,11 @@ def inside_key(entry):
 
 
 def summarize_errors(profile):
+    version = profile.get("SchemaVersion") if isinstance(profile, dict) else None
+    if not isinstance(version, int) or version != 2:
+        raise ValueError(
+            "unsupported profile SchemaVersion; record again with SchemaVersion 2"
+        )
     files = []
     for file in sorted(profile["Files"], key=lambda file: file["Path"]):
         if not file["HasErrors"]:

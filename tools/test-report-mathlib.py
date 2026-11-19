@@ -61,7 +61,7 @@ class ReportTests(unittest.TestCase):
             "TraceWallSeconds": 0.5,
             "TraceExitCode": 0,
         }
-        self.profile = {"Files": []}
+        self.profile = {"SchemaVersion": 2, "Files": []}
 
     def test_aggregation_and_escaping(self):
         second = copy.deepcopy(self.entry)
@@ -250,6 +250,60 @@ class ReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SchemaVersion"):
             module["render"](
                 self.hotspots, self.metadata, {**summary, "SchemaVersion": 99}
+            )
+
+    def test_profile_schema_is_checked_before_content(self):
+        invalid = [{}, [], None] + [
+            {"SchemaVersion": version, "Files": 42}
+            for version in [None, 0, 1, 3, "2", 2.0, True]
+        ]
+        for profile in invalid:
+            with (
+                self.subTest(profile=profile),
+                self.assertRaisesRegex(ValueError, "SchemaVersion; record again"),
+            ):
+                module["summarize_errors"](profile)
+
+    def test_summarize_profile_validates_schema_before_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            work = Path(directory)
+            (work / "hotspots.json").write_text(json.dumps(self.hotspots))
+            (work / "metadata.json").write_text(json.dumps(self.metadata))
+            (work / "errors.json").write_text("existing summary\n")
+            (work / "README.md").write_text("existing report\n")
+            source = work / "external.json"
+            command = [
+                sys.executable,
+                str(script),
+                "--input-dir",
+                str(work),
+                "--output-dir",
+                str(work),
+                "--summarize-profile",
+                str(source),
+            ]
+            for profile in [{}, {"SchemaVersion": 1, "Files": 42}]:
+                with self.subTest(profile=profile):
+                    source.write_text(json.dumps(profile))
+                    result = subprocess.run(
+                        command, capture_output=True, text=True, check=False
+                    )
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("SchemaVersion; record again", result.stderr)
+                    self.assertEqual(
+                        (work / "errors.json").read_text(), "existing summary\n"
+                    )
+                    self.assertEqual(
+                        (work / "README.md").read_text(), "existing report\n"
+                    )
+            source.write_text(json.dumps(self.profile))
+            result = subprocess.run(
+                command, capture_output=True, text=True, check=False
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                json.loads((work / "errors.json").read_text()),
+                {"SchemaVersion": 1, "Files": []},
             )
 
     def test_check_requires_summary_without_writing(self):
