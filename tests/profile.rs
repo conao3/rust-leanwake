@@ -1338,6 +1338,87 @@ fn nested_command_elaborators_preserve_synchronous_proof_costs() {
 }
 
 #[test]
+fn lazy_realization_kernel_replay_finishes_before_measurement_stops() {
+    let root = fixture("async");
+    std::fs::write(
+        root.join("Probe.lean"),
+        r#"import Lean
+set_option maxRecDepth 100000
+set_option maxHeartbeats 0
+def seed : Nat := 0
+run_meta do
+  let opts ← Lean.getOptions
+  Lean.setEnv (← (← Lean.getEnv).enableRealizationsForConst opts ``seed)
+  Lean.Meta.realizeConst ``seed `lazyEquation do
+    let zero := Lean.mkNatLit 0
+    let id := Lean.mkLambda `n .default (Lean.mkConst ``Nat) (.bvar 0)
+    let value := (List.range 4000).foldl (fun value _ => Lean.mkApp id value) zero
+    Lean.addDecl <| .thmDecl {
+      name := `lazyEquation
+      levelParams := []
+      type := Lean.mkApp3 (Lean.mkConst ``Eq [1]) (Lean.mkConst ``Nat) value zero
+      value := Lean.mkApp2 (Lean.mkConst ``Eq.refl [1]) (Lean.mkConst ``Nat) zero
+    }
+    Lean.logWarning "realized lazyEquation"
+def afterRealization : Nat := 1
+"#,
+    )
+    .unwrap();
+    let source = std::fs::read_to_string(root.join("Probe.lean")).unwrap();
+    for detail in ["none", "steps"] {
+        std::fs::write(root.join("Probe.lean"), &source).unwrap();
+        let measure = || {
+            cli(&[
+                "profile",
+                "record-profile",
+                "--project-dir",
+                root.to_str().unwrap(),
+                "--detail",
+                detail,
+            ])
+        };
+        let output = measure();
+        assert_code(&output, 0);
+        let profile: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            profile["Files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|file| file["HasErrors"] == false)
+        );
+        let rows = commands(&profile);
+        let realization = rows
+            .iter()
+            .find(|row| row["Range"]["Start"]["Line"] == 5)
+            .unwrap();
+        assert_eq!(realization["HasErrors"], false);
+        assert!(realization["ElapsedNs"].as_u64().unwrap() > 0);
+        assert!(realization["Heartbeats"].as_u64().unwrap() > 0);
+        assert!(rows.iter().any(|row| row["Key"] == "afterRealization"));
+        if detail == "steps" {
+            let nodes = flatten_steps(realization["Steps"].as_array().unwrap());
+            assert!(
+                nodes
+                    .iter()
+                    .any(|node| node["Class"] == "Meta.realizeConst")
+            );
+            assert!(nodes.iter().any(|node| node["Class"] == "Kernel"));
+        }
+        std::fs::write(
+            root.join("Probe.lean"),
+            source.replace("Lean.logWarning", "Lean.logError"),
+        )
+        .unwrap();
+        let failed = measure();
+        assert_code(&failed, 254);
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("realized lazyEquation"));
+        let profile: Value = serde_json::from_slice(&failed.stdout).unwrap();
+        assert_eq!(profile["Files"][0]["HasErrors"], true);
+    }
+}
+
+#[test]
 fn unfinished_elaboration_tasks_are_reported_as_errors() {
     let root = fixture("async");
     std::fs::write(root.join("lakefile.toml"), "name = \"pending\"\ndefaultTargets = [\"Probe\"]\n[[lean_lib]]\nname = \"Pending\"\n[[lean_lib]]\nname = \"Probe\"\n").unwrap();

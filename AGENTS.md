@@ -143,13 +143,24 @@ Unknown trace positions stay null; child nodes never inherit a parent's position
 write trace trees through `json_io` and drain nested children iteratively on
 drop; real profiles exceed serde_json's default nesting limit.
 
-Collect completed snapshot diagnostics and trace trees after measurement.
-Lean uses completed snapshots for synchronous lazy realization. Check every
-snapshot and its children without waiting; an unfinished task marks the command
-and file as errored, reports why, and stops that file. Arbitrary detached tasks
-created by user metaprograms outside Lean's snapshot registry are outside the
-measurement contract. Fixtures check nested synchronous proof costs and reject
-unfinished registered tasks in both detail modes.
+Before stopping the clock and reading the final heartbeat counter, wait for the
+command environment's `checked` task. This joins Lean-owned kernel checking and
+lazy-realization replay, including the checked-task dependency chain, inside the
+measured wall time. Heartbeats remain the raw measuring thread's counter delta;
+do not add worker-thread allocations or replace it with elapsed time.
+Kernel replay completion can leave its diagnostic snapshot callback queued. Allow
+registered snapshots and their children up to one second total to settle after
+joining `checked`, still inside the measured interval. This is a reporting grace
+period, not a timeout on kernel checking. Snapshot promises do not identify their
+producer, so this bounded wait also covers user-created snapshots without hanging.
+Then collect completed snapshot diagnostics and trace trees after measurement.
+Check every snapshot and its children without waiting; an unfinished task marks
+the command and file as errored, reports why, and stops that file. Arbitrary
+detached tasks created by user metaprograms outside Lean's snapshot registry are
+outside the measurement contract. Only the environment's checked chain is joined without a
+deadline; never unconditionally join arbitrary snapshot promises. Fixtures check
+nested synchronous proof costs, realized theorem kernel replay and its diagnostics
+and traces, and rejection of unfinished registered tasks in both detail modes.
 
 Keep parser diagnostics separately: Lean's top-level elaborator resets its
 message log. A file with parser, import or elaboration errors has `HasErrors`.
