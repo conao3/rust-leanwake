@@ -69,6 +69,7 @@ def render(hotspots, metadata, error_summary):
         key=lambda entry: (-entry["ElapsedNs"], entry["Path"], entry["Key"]),
     )[:50]
     rows = []
+    incomplete_rows = []
     tactics = {}
     identities = set()
     for rank, entry in enumerate(listed, 1):
@@ -93,6 +94,9 @@ def render(hotspots, metadata, error_summary):
         )
         position = entry["Range"]
         line = position["Start"]["Line"] if position else "unknown"
+        if traced and traced.get("HasErrors", False):
+            summary += " (incomplete trace)"
+            incomplete_rows.append([f"{entry['Path']}:{line}", entry["Key"]])
         rows.append(
             [
                 rank,
@@ -198,10 +202,22 @@ def render(hotspots, metadata, error_summary):
             rows,
         ),
         "",
+        "## Incomplete traced breakdowns",
+        "",
+        (
+            "These declarations have Traced.HasErrors=true; their traced breakdowns are incomplete. "
+            "Their rankings and seconds still come from the untraced pass."
+            if incomplete_rows
+            else "No listed declarations have incomplete traced breakdowns."
+        ),
+        "",
+        *table(["Path:line", "Declaration key"], incomplete_rows),
+        "",
         "## Time-consuming tactics",
         "",
         (
             "This aggregation covers only the top-50 declarations' traced pass, not all of Mathlib. "
+            "Partial breakdowns from declarations marked incomplete trace are included. "
             "Only Inside entries with Class Leanwake.tactic contribute; occurrences sum Count, "
             "and declarations count distinct (Path, Key) pairs per tactic kind."
         ),

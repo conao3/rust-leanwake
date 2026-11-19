@@ -81,6 +81,9 @@ class ReportTests(unittest.TestCase):
         result = render(self.hotspots, self.metadata, self.profile)
         self.assertIn("No files with errors in the untraced recording.", result)
         self.assertIn(
+            "No listed declarations have incomplete traced breakdowns.", result
+        )
+        self.assertIn(
             "Recording: 0.75 s, exit code 0; checkpoint tracing: 0.50 s, exit code 0.",
             result,
         )
@@ -101,6 +104,21 @@ class ReportTests(unittest.TestCase):
         self.hotspots["Hotspots"].append(self.entry)
         with self.assertRaisesRegex(ValueError, "duplicate hotspot identity"):
             render(self.hotspots, self.metadata, self.profile)
+
+    def test_incomplete_traces_are_marked_and_aggregated(self):
+        self.entry["Traced"]["HasErrors"] = True
+        result = render(self.hotspots, self.metadata, self.profile)
+        self.assertIn("simp 2:3-4:5 x3 50.0% (incomplete trace)", result)
+        self.assertIn("| Mathlib/A.lean:2 | a |", result)
+        self.assertIn("Traced.HasErrors=true", result)
+        self.assertIn(
+            "Partial breakdowns from declarations marked incomplete trace are included.",
+            result,
+        )
+        self.assertIn("| simp | 1.000000 | 1000000000 | 3 | 1 |", result)
+        self.entry["Traced"]["Inside"] = []
+        result = render(self.hotspots, self.metadata, self.profile)
+        self.assertIn("unavailable (incomplete trace)", result)
 
     def test_limit_and_tactic_order(self):
         self.hotspots["Hotspots"] = [

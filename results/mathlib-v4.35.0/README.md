@@ -63,7 +63,7 @@ Showing 50 listed declarations. Ranking, seconds and share use the untraced pass
 | 2 | 24.696637 | 0.1% | Mathlib/AlgebraicGeometry/ProjectiveSpectrum/Functor.lean:179 | AlgebraicGeometry.Proj.awayι_comp_map | 127536796 | Lean.Parser.Tactic.simp 196:2-196:87 x1 1.2% |
 | 3 | 23.119181 | 0.1% | Mathlib/CategoryTheory/Abelian/Indization.lean:32 | CategoryTheory.instIsIsoIndCoimageImageComparison | 143516235 | Lean.Parser.Tactic.paren 38:2-39:91 x1 1.2% |
 | 4 | 22.813384 | 0.1% | Mathlib/AlgebraicGeometry/Sites/ElladicCohomology.lean:79 | AlgebraicGeometry.Scheme.instAddCommGroupEllAdicCohomology | 115537844 | Kernel x17 97.5% |
-| 5 | 18.802749 | 0.1% | Mathlib/AlgebraicGeometry/Modules/Sheaf.lean:309 | AlgebraicGeometry.Scheme.Modules.pseudofunctor | 164714036 | CategoryTheory.cat_disch 322:2-322:33 x3 93.4% |
+| 5 | 18.802749 | 0.1% | Mathlib/AlgebraicGeometry/Modules/Sheaf.lean:309 | AlgebraicGeometry.Scheme.Modules.pseudofunctor | 164714036 | CategoryTheory.cat_disch 322:2-322:33 x3 93.4% (incomplete trace) |
 | 6 | 17.290131 | 0.1% | Mathlib/CategoryTheory/Sites/SheafCohomology/ExactSequences.lean:83 | CategoryTheory.Sheaf.H.longSequenceHom | 97902818 | Lean.Parser.Tactic.simp 91:4-91:81 x5 12.6% |
 | 7 | 14.657178 | 0.1% | Mathlib/AlgebraicGeometry/Group/Affine.lean:421 | AlgebraicGeometry.instIsMonHomOverSchemeSpecOfAsOverHomTransPullbackSymmetryOverInferInstanceOverClassPullbackSpecIso' | 114946134 | Lean.Parser.Tactic.simp 433:6-437:74 x1 34.4% |
 | 8 | 14.082210 | 0.1% | Mathlib/CategoryTheory/LocallyCartesianClosed/ChosenPullbacksAlong.lean:330 | CategoryTheory.ChosenPullbacksAlong.chosenPullbacksAlongFst | 26388271 | CategoryTheory.cat_disch 337:2-337:16 x2 83.8% |
@@ -110,9 +110,17 @@ Showing 50 listed declarations. Ranking, seconds and share use the untraced pass
 | 49 | 6.759472 | 0.0% | Mathlib/Algebra/Lie/Cochain.lean:122 | LieModule.Cohomology.d₂₃ | 50981949 | Lean.Parser.Tactic.simp 134:26-134:30 x1 17.1% |
 | 50 | 6.595481 | 0.0% | Mathlib/Algebra/Category/ModuleCat/Sheaf/Quasicoherent.lean:428 | SheafOfModules.QuasicoherentData.bind | 51435224 | Lean.Parser.Tactic.exact 443:10-443:71 x1 40.2% |
 
+## Incomplete traced breakdowns
+
+These declarations have Traced.HasErrors=true; their traced breakdowns are incomplete. Their rankings and seconds still come from the untraced pass.
+
+| Path:line | Declaration key |
+| --- | --- |
+| Mathlib/AlgebraicGeometry/Modules/Sheaf.lean:309 | AlgebraicGeometry.Scheme.Modules.pseudofunctor |
+
 ## Time-consuming tactics
 
-This aggregation covers only the top-50 declarations' traced pass, not all of Mathlib. Only Inside entries with Class Leanwake.tactic contribute; occurrences sum Count, and declarations count distinct (Path, Key) pairs per tactic kind.
+This aggregation covers only the top-50 declarations' traced pass, not all of Mathlib. Partial breakdowns from declarations marked incomplete trace are included. Only Inside entries with Class Leanwake.tactic contribute; occurrences sum Count, and declarations count distinct (Path, Key) pairs per tactic kind.
 
 | Tactic kind | Seconds | ElapsedNs | Occurrences | Declarations |
 | --- | --- | --- | --- | --- |
