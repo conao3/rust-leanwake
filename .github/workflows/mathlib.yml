@@ -1,0 +1,93 @@
+name: Mathlib hotspots
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - tools/profile-mathlib.py
+      - tools/test-profile-mathlib.py
+      - tools/report-mathlib.py
+      - tools/test-report-mathlib.py
+      - results/**
+      - .github/workflows/mathlib.yml
+      - .github/workflows/actions.lock
+  pull_request:
+    paths:
+      - tools/profile-mathlib.py
+      - tools/test-profile-mathlib.py
+      - tools/report-mathlib.py
+      - tools/test-report-mathlib.py
+      - results/**
+      - .github/workflows/mathlib.yml
+      - .github/workflows/actions.lock
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: Space-separated Mathlib source paths for the smoke measurement
+        default: Mathlib/Data/Nat/Notation.lean Mathlib/Data/Int/Notation.lean Mathlib/Data/Bool/Basic.lean
+        required: true
+        type: string
+      limit:
+        description: Number of smoke hotspots
+        default: '3'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Clone pinned Mathlib
+        run: |
+          mkdir -p "$RUNNER_TEMP/mathlib-work"
+          git clone --branch v4.35.0 --single-branch https://github.com/leanprover-community/mathlib4.git "$RUNNER_TEMP/mathlib-work/mathlib4"
+      - uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.elan
+            ${{ runner.temp }}/mathlib-work/mathlib4/.lake
+          key: mathlib-${{ runner.os }}-${{ runner.arch }}-56a005855ea17e0b0958f73ec801ae140b0a1679
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o "$RUNNER_TEMP/elan-init.sh"
+          sh "$RUNNER_TEMP/elan-init.sh" -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: Test measurement and report generation
+        run: |
+          python3 tools/test-profile-mathlib.py
+          python3 tools/test-report-mathlib.py
+      - name: Measure smoke hotspots
+        env:
+          SMOKE_PATHS: ${{ inputs.paths || 'Mathlib/Data/Nat/Notation.lean Mathlib/Data/Int/Notation.lean Mathlib/Data/Bool/Basic.lean' }}
+          SMOKE_LIMIT: ${{ inputs.limit || '3' }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import shlex
+          import subprocess
+          import sys
+
+          paths = shlex.split(os.environ["SMOKE_PATHS"])
+          if not paths:
+              raise SystemExit("Smoke paths must not be empty")
+          subprocess.run([
+              sys.executable, "tools/profile-mathlib.py",
+              "--work-dir", os.environ["RUNNER_TEMP"] + "/mathlib-work",
+              "--output-dir", os.environ["RUNNER_TEMP"] + "/mathlib-smoke",
+              "--jobs", "4", "--limit", os.environ["SMOKE_LIMIT"], "--paths", *paths,
+          ], check=True)
+          PY
+      - name: Render smoke report
+        if: always()
+        run: |
+          python3 tools/report-mathlib.py --input-dir "$RUNNER_TEMP/mathlib-smoke" --output-dir "$RUNNER_TEMP/mathlib-report"
+          python3 tools/report-mathlib.py --input-dir "$RUNNER_TEMP/mathlib-smoke" --output-dir "$RUNNER_TEMP/mathlib-report" --check
+          cat "$RUNNER_TEMP/mathlib-report/README.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Check committed report
+        if: always()
+        run: python3 tools/report-mathlib.py --check
