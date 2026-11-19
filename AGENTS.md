@@ -121,11 +121,16 @@ commands with a 1 ms capture threshold, sets `trace.profiler` and
 `trace.Leanwake.tactic` to false for the other commands, emits rows only for the
 traced commands and stops after the last one. A per-command mode stored in an
 `IO.Ref` is read by the command elaborator wrappers, so nested scopes get the same
-options. The host matches traced rows by path and start position, rejects a
-different `Key`, and groups the innermost tactic nodes with a range by kind and
-range. In a chain of nodes with one range it reports the outermost kind that is not
+options. The host matches traced rows by path and start position, verifies source
+hashes, rejects a different `Key` on error-free commands, and groups the innermost
+tactic nodes with a range by kind and range. In a chain of nodes with one range it reports the outermost kind that is not
 a tactic sequence. Without tactic nodes it reports the self time of trace classes.
 Shares inside a declaration are relative to its traced `ElapsedNs`.
+
+With both `--profile` and `--project-dir`, validate synchronous detail-none conditions,
+the current toolchain and every recorded source hash, then reuse the untraced ranking
+without recording again. Errored traced rows may have fallback keys when declaration
+creation fails; retain the untraced identity and emit their incomplete breakdowns.
 
 Wrap every command elaborator entry, restoring measurement options before and
 after each handler. Refresh wrappers before each top-level command; a scoped
@@ -321,6 +326,9 @@ at a known range, a term-mode proof and several fast declarations in three files
 the `decide` range as the first inside entry, report trace classes for the
 term-mode proof, keep the total equal to the sum of command times and keep listed
 and inside times at or below their totals. Rankings from `--profile` must equal the
-recording sorted by elapsed time, path and key. Tests check 252 for both or neither
-input, `--profile` with `--detail steps`, `--jobs` or `--paths`, 254 for steps and
-version 1 profiles and for files with errors, and assert no absolute times.
+recording sorted by elapsed time, path and key. Tests check 252 for neither input,
+`--profile` alone with `--detail steps`, `--jobs` or `--paths`, and both inputs with
+`--detail none`. Checkpoint tests cover unchanged rankings, empty profiles, source,
+toolchain and conditions mismatches, and error-free key mismatches. A heartbeat-bound
+fixture checks traced-only failure before declaration creation, retained identity,
+errored breakdowns and printed output. Tests assert no absolute times.

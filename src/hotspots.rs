@@ -351,6 +351,7 @@ fn trace(
     options: &Hotspots,
     project_dir: &Path,
     listed: &[(&File, &Command)],
+    expected: &Profile,
 ) -> Result<BTreeMap<(String, u64, u64), Command>> {
     let mut targets = Targets::new();
     for (file, command) in listed {
@@ -369,8 +370,24 @@ fn trace(
         capture_threshold_ms: TRACED_THRESHOLD_NS / 1_000_000,
     };
     let profile = project::record(&record, Some(&targets))?;
+    if profile.toolchain != expected.toolchain || profile.conditions.r#async {
+        return Err(Error::target(
+            "traced measurement conditions differ from recording",
+        ));
+    }
     let mut traced = BTreeMap::new();
     for file in profile.files {
+        let original = expected
+            .files
+            .iter()
+            .find(|original| original.path == file.path)
+            .ok_or_else(|| Error::target("traced measurement returned an unexpected file"))?;
+        if file.source_sha256 != original.source_sha256 {
+            return Err(Error::target(format!(
+                "source changed during measurement: {}",
+                file.path
+            )));
+        }
         for command in file.commands {
             traced.insert(
                 (
@@ -402,13 +419,13 @@ pub fn run(options: Hotspots, output: Output) -> Result<u8> {
                 options.detail.unwrap_or(Detail::Steps),
             )
         }
-        (None, Some(input)) => {
-            if options.detail == Some(Detail::Steps) {
+        (project_dir, Some(input)) => {
+            if project_dir.is_none() && options.detail == Some(Detail::Steps) {
                 return Err(Error::parameter(
                     "--detail steps measures the project again; use --project-dir",
                 ));
             }
-            if options.jobs.is_some() || !options.paths.is_empty() {
+            if (project_dir.is_none() && options.jobs.is_some()) || !options.paths.is_empty() {
                 return Err(Error::parameter(
                     "--jobs and --paths apply to --project-dir",
                 ));
@@ -420,11 +437,22 @@ pub fn run(options: Hotspots, output: Output) -> Result<u8> {
                     "--profile: list-hotspots ranks untraced elapsed times; use a profile recorded with --detail none",
                 ));
             }
-            (profile, Detail::None)
+            let detail = if let Some(project_dir) = project_dir {
+                if options.detail == Some(Detail::None) {
+                    return Err(Error::parameter(
+                        "--profile with --project-dir requires --detail steps",
+                    ));
+                }
+                project::validate_checkpoint(&profile, project_dir)?;
+                Detail::Steps
+            } else {
+                Detail::None
+            };
+            (profile, detail)
         }
         _ => {
             return Err(Error::parameter(
-                "use exactly one of --project-dir and --profile",
+                "use --project-dir, --profile, or both for checkpoint tracing",
             ));
         }
     };
@@ -436,7 +464,7 @@ pub fn run(options: Hotspots, output: Output) -> Result<u8> {
     let mut failed = files_with_errors > 0;
     let mut traced = match (detail, &options.project_dir) {
         (Detail::Steps, Some(project_dir)) if !listed.is_empty() => {
-            Some(trace(&options, project_dir, &listed)?)
+            Some(trace(&options, project_dir, &listed, &profile)?)
         }
         _ => None,
     };
@@ -455,7 +483,7 @@ pub fn run(options: Hotspots, output: Output) -> Result<u8> {
                         file.path, command.range.start.line, command.range.start.column
                     ))
                 })?;
-                if measured.key != command.key {
+                if measured.key != command.key && !measured.has_errors {
                     return Err(Error::target(format!(
                         "source changed during measurement: {} has Key {:?} instead of {:?}",
                         file.path, measured.key, command.key

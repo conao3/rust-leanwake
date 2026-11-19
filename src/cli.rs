@@ -143,7 +143,7 @@ pub struct Record {
 pub const STEP_THRESHOLD_NS: u64 = 100_000;
 
 #[derive(Args)]
-#[command(group(ArgGroup::new("input").required(true).args(["project_dir", "profile"])))]
+#[command(group(ArgGroup::new("input").required(true).multiple(true).args(["project_dir", "profile"])))]
 pub struct Hotspots {
     #[arg(long, value_parser = path)]
     pub project_dir: Option<PathBuf>,
