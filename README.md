@@ -84,9 +84,41 @@ Options:
 
 - `--project-dir DIR` measures now. `--paths PATH ...` and `--jobs N` select files and parallel workers as in `record-profile`.
 - `--profile file://profile.json` ranks an existing `--detail none` recording without measuring. It prints the ranking that measuring would print for that recording, without the breakdown.
-- `--detail none|steps` turns the breakdown off or on. It defaults to `steps` with `--project-dir`; `--profile` accepts only `none`.
+- `--profile file://profile.json --project-dir DIR` resumes from an untraced checkpoint and measures only the traced breakdown. The profile must have synchronous, detail-none conditions and the same toolchain as the project; every recorded file's source hash must match. `--jobs` controls tracing; `--paths` is not accepted because the checkpoint selects the files.
+- `--detail none|steps` turns the breakdown off or on. It defaults to `steps` with `--project-dir`; `--profile` alone accepts only `none`.
 
-Give exactly one of `--project-dir` and `--profile`; otherwise the exit code is 252. Files with errors are reported on standard error, counted in `FilesWithErrors` and make the exit code 254, as does an error that appears only in the traced pass (tracing raises heartbeats, so a proof close to `maxHeartbeats` can fail there); the listing is still printed.
+Give at least one of `--project-dir` and `--profile`; otherwise the exit code is 252. Together they require `--detail steps` (the default). Files with errors are reported on standard error, counted in `FilesWithErrors` and make the exit code 254, as does an error that appears only in the traced pass (tracing raises heartbeats, so a proof close to `maxHeartbeats` can fail there); the listing is still printed. Traced rows match by path and command start after checking the source hash. An errored traced command may lack the original declaration name; the listing retains the untraced key, name and ranking and marks `Traced.HasErrors=true`. Changed source and different keys on error-free traced commands are rejected.
+
+### Mathlib checkpoints
+
+`python3 tools/profile-mathlib.py --work-dir ~/work --output-dir ~/work/mathlib-hotspots`
+uses the pinned Mathlib checkout and official elan toolchain. It saves the untraced
+recording as `profile.json` before producing `hotspots.json` from checkpoint tracing.
+Both phases share `stderr.log`; `metadata.json` records `RecordWallSeconds`,
+`RecordExitCode`, `TraceWallSeconds` and `TraceExitCode`, as well as overall timing
+and status. A recording exit of 254 still proceeds to tracing; other failures stop
+before tracing, leaving its metadata fields null. The checkpoint and recording
+metadata remain available even if tracing fails. With the same official toolchain
+environment, retry only tracing with:
+
+```sh
+target/debug/leanwake profile list-hotspots \
+  --profile file://$HOME/work/mathlib-hotspots/profile.json \
+  --project-dir "$HOME/work/mathlib4" --jobs 4 --limit 50 --output json
+```
+
+Generate the Markdown report with
+`python3 tools/report-mathlib.py --input-dir ~/work/mathlib-hotspots --output-dir ~/work/mathlib-hotspots`.
+If a local `profile.json` is present, generation derives a small `errors.json` from it.
+Without that large artifact, generation and `--check` read only `errors.json`,
+`hotspots.json` and `metadata.json`, including both measurement phases; `--check`
+never reads the large profile. Derive a summary from an external checkpoint with
+`--summarize-profile /path/to/profile.json`.
+The committed [Mathlib results](results/mathlib-v4.35.0/README.md) omit the large
+`profile.json`; regenerate that local artifact with the measurement command above.
+Lean 4.35.0's synchronous elaboration fails on some Mathlib files that Lake builds cleanly
+(also reproducible with plain `lean -DElab.async=false --setup ...`). Their commands
+after the failure are missing or errored; the report lists affected files and counts.
 
 ## Record and inspect
 

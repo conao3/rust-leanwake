@@ -38,6 +38,8 @@ for Cargo and GitHub Actions.
 - `audit/`: leanassay mutation checks for the generated functions called by Rust.
 - `tools/check-format.py`: tracked-file formatting with isolated Git configuration.
 - `tools/check-package.py`: installed wrapper, plugin compiler, local Git dependency and PATH priority.
+- `tools/profile-mathlib.py` and `tools/test-profile-mathlib.py`: pinned official-toolchain Mathlib recording, checkpoints and per-phase measurement metadata.
+- `tools/report-mathlib.py` and `tools/test-report-mathlib.py`: deterministic Mathlib reports, compact error summaries, phase metadata and synchronous-error file coverage. Committed results omit the large local profile; report checks read errors.json instead.
 - `native/Project.lean`: Lake's loaded workspace, module arguments and paths.
 - `native/Main.lean`: synchronous elaboration, per-command tracing, ranges, names and measurements.
 - `native/Sha256.lean`: SHA-256 for source identity and unnamed command keys.
@@ -121,11 +123,16 @@ commands with a 1 ms capture threshold, sets `trace.profiler` and
 `trace.Leanwake.tactic` to false for the other commands, emits rows only for the
 traced commands and stops after the last one. A per-command mode stored in an
 `IO.Ref` is read by the command elaborator wrappers, so nested scopes get the same
-options. The host matches traced rows by path and start position, rejects a
-different `Key`, and groups the innermost tactic nodes with a range by kind and
-range. In a chain of nodes with one range it reports the outermost kind that is not
+options. The host matches traced rows by path and start position, verifies source
+hashes, rejects a different `Key` on error-free commands, and groups the innermost
+tactic nodes with a range by kind and range. In a chain of nodes with one range it reports the outermost kind that is not
 a tactic sequence. Without tactic nodes it reports the self time of trace classes.
 Shares inside a declaration are relative to its traced `ElapsedNs`.
+
+With both `--profile` and `--project-dir`, validate synchronous detail-none conditions,
+the current toolchain and every recorded source hash, then reuse the untraced ranking
+without recording again. Errored traced rows may have fallback keys when declaration
+creation fails; retain the untraced identity and emit their incomplete breakdowns.
 
 Wrap every command elaborator entry, restoring measurement options before and
 after each handler. Refresh wrappers before each top-level command; a scoped
@@ -137,13 +144,24 @@ Unknown trace positions stay null; child nodes never inherit a parent's position
 write trace trees through `json_io` and drain nested children iteratively on
 drop; real profiles exceed serde_json's default nesting limit.
 
-Collect completed snapshot diagnostics and trace trees after measurement.
-Lean uses completed snapshots for synchronous lazy realization. Check every
-snapshot and its children without waiting; an unfinished task marks the command
-and file as errored, reports why, and stops that file. Arbitrary detached tasks
-created by user metaprograms outside Lean's snapshot registry are outside the
-measurement contract. Fixtures check nested synchronous proof costs and reject
-unfinished registered tasks in both detail modes.
+Before stopping the clock and reading the final heartbeat counter, wait for the
+command environment's `checked` task. This joins Lean-owned kernel checking and
+lazy-realization replay, including the checked-task dependency chain, inside the
+measured wall time. Heartbeats remain the raw measuring thread's counter delta;
+do not add worker-thread allocations or replace it with elapsed time.
+Kernel replay completion can leave its diagnostic snapshot callback queued. Allow
+registered snapshots and their children up to one second total to settle after
+joining `checked`, still inside the measured interval. This is a reporting grace
+period, not a timeout on kernel checking. Snapshot promises do not identify their
+producer, so this bounded wait also covers user-created snapshots without hanging.
+Then collect completed snapshot diagnostics and trace trees after measurement.
+Check every snapshot and its children without waiting; an unfinished task marks
+the command and file as errored, reports why, and stops that file. Arbitrary
+detached tasks created by user metaprograms outside Lean's snapshot registry are
+outside the measurement contract. Only the environment's checked chain is joined without a
+deadline; never unconditionally join arbitrary snapshot promises. Fixtures check
+nested synchronous proof costs, realized theorem kernel replay and its diagnostics
+and traces, and rejection of unfinished registered tasks in both detail modes.
 
 Keep parser diagnostics separately: Lean's top-level elaborator resets its
 message log. A file with parser, import or elaboration errors has `HasErrors`.
@@ -180,6 +198,12 @@ Unsupported toolchains and unsupported compiler arguments fail rather
 than silently changing the execution conditions.
 
 ## Repeatability evidence
+
+Official Lean 4.35.0 has synchronous private-name export failures reproducible with
+plain `lean -DElab.async=false --setup ...`; Lake's default asynchronous builds of
+the same Mathlib files succeed. Do not work around this in the adapter or change
+the pinned toolchain. Mathlib reports list errored files from the untraced checkpoint
+and warn that commands after failures may be missing or errored.
 
 On 2026-11-17, two recordings with `--jobs 4` on four Linux CPU cores measured
 61 files and 967 commands in lean-ritsuryo, and 30 files and 253 commands in
@@ -321,6 +345,9 @@ at a known range, a term-mode proof and several fast declarations in three files
 the `decide` range as the first inside entry, report trace classes for the
 term-mode proof, keep the total equal to the sum of command times and keep listed
 and inside times at or below their totals. Rankings from `--profile` must equal the
-recording sorted by elapsed time, path and key. Tests check 252 for both or neither
-input, `--profile` with `--detail steps`, `--jobs` or `--paths`, 254 for steps and
-version 1 profiles and for files with errors, and assert no absolute times.
+recording sorted by elapsed time, path and key. Tests check 252 for neither input,
+`--profile` alone with `--detail steps`, `--jobs` or `--paths`, and both inputs with
+`--detail none`. Checkpoint tests cover unchanged rankings, empty profiles, source,
+toolchain and conditions mismatches, and error-free key mismatches. A heartbeat-bound
+fixture checks traced-only failure before declaration creation, retained identity,
+errored breakdowns and printed output. Tests assert no absolute times.

@@ -58,6 +58,17 @@ def forceSynchronous (env : Environment) : Environment := Id.run do
                 { scope with opts := measurementOptions tracing scope.opts } }) }
   return wrappedCommands.modifyState env fun _ => names
 
+def settleSnapshots (tasks : Array (Language.SnapshotTask Language.SnapshotTree)) : IO Unit := do
+  let deadline := (← IO.monoNanosNow) + 1000000000
+  let mut pending := tasks
+  while !pending.isEmpty do
+    let task := pending.back!
+    pending := pending.pop
+    while !(← IO.hasFinished task.task) do
+      if (← IO.monoNanosNow) ≥ deadline then return
+      IO.sleep 1
+    pending := pending ++ task.get.children
+
 def finishedSnapshots (tasks : Array (Language.SnapshotTask Language.SnapshotTree)) :
     IO (Array Language.Snapshot × Bool) := do
   let mut pending := tasks.reverse
@@ -178,9 +189,11 @@ def measureCommands (path input : String) (steps : Bool) (threshold : Nat) (capt
     let h0 ← IO.getNumHeartbeats
     let t0 ← IO.monoNanosNow
     runCommandElabM <| Command.elabCommandTopLevel cmd previousCommands
+    let state ← getCommandState
+    discard <| IO.wait state.env.checked
+    settleSnapshots state.snapshotTasks
     let t1 ← IO.monoNanosNow
     let h1 ← IO.getNumHeartbeats
-    let state ← getCommandState
     let (snapshots, unfinished) ← finishedSnapshots state.snapshotTasks
     let mut diagnostics := messages ++ state.messages
     let mut traces := if traced then stateSteps ictx.fileMap threshold state.traceState else #[]

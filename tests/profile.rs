@@ -1338,6 +1338,87 @@ fn nested_command_elaborators_preserve_synchronous_proof_costs() {
 }
 
 #[test]
+fn lazy_realization_kernel_replay_finishes_before_measurement_stops() {
+    let root = fixture("async");
+    std::fs::write(
+        root.join("Probe.lean"),
+        r#"import Lean
+set_option maxRecDepth 100000
+set_option maxHeartbeats 0
+def seed : Nat := 0
+run_meta do
+  let opts ← Lean.getOptions
+  Lean.setEnv (← (← Lean.getEnv).enableRealizationsForConst opts ``seed)
+  Lean.Meta.realizeConst ``seed `lazyEquation do
+    let zero := Lean.mkNatLit 0
+    let id := Lean.mkLambda `n .default (Lean.mkConst ``Nat) (.bvar 0)
+    let value := (List.range 4000).foldl (fun value _ => Lean.mkApp id value) zero
+    Lean.addDecl <| .thmDecl {
+      name := `lazyEquation
+      levelParams := []
+      type := Lean.mkApp3 (Lean.mkConst ``Eq [1]) (Lean.mkConst ``Nat) value zero
+      value := Lean.mkApp2 (Lean.mkConst ``Eq.refl [1]) (Lean.mkConst ``Nat) zero
+    }
+    Lean.logWarning "realized lazyEquation"
+def afterRealization : Nat := 1
+"#,
+    )
+    .unwrap();
+    let source = std::fs::read_to_string(root.join("Probe.lean")).unwrap();
+    for detail in ["none", "steps"] {
+        std::fs::write(root.join("Probe.lean"), &source).unwrap();
+        let measure = || {
+            cli(&[
+                "profile",
+                "record-profile",
+                "--project-dir",
+                root.to_str().unwrap(),
+                "--detail",
+                detail,
+            ])
+        };
+        let output = measure();
+        assert_code(&output, 0);
+        let profile: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            profile["Files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|file| file["HasErrors"] == false)
+        );
+        let rows = commands(&profile);
+        let realization = rows
+            .iter()
+            .find(|row| row["Range"]["Start"]["Line"] == 5)
+            .unwrap();
+        assert_eq!(realization["HasErrors"], false);
+        assert!(realization["ElapsedNs"].as_u64().unwrap() > 0);
+        assert!(realization["Heartbeats"].as_u64().unwrap() > 0);
+        assert!(rows.iter().any(|row| row["Key"] == "afterRealization"));
+        if detail == "steps" {
+            let nodes = flatten_steps(realization["Steps"].as_array().unwrap());
+            assert!(
+                nodes
+                    .iter()
+                    .any(|node| node["Class"] == "Meta.realizeConst")
+            );
+            assert!(nodes.iter().any(|node| node["Class"] == "Kernel"));
+        }
+        std::fs::write(
+            root.join("Probe.lean"),
+            source.replace("Lean.logWarning", "Lean.logError"),
+        )
+        .unwrap();
+        let failed = measure();
+        assert_code(&failed, 254);
+        assert!(String::from_utf8_lossy(&failed.stderr).contains("realized lazyEquation"));
+        let profile: Value = serde_json::from_slice(&failed.stdout).unwrap();
+        assert_eq!(profile["Files"][0]["HasErrors"], true);
+    }
+}
+
+#[test]
 fn unfinished_elaboration_tasks_are_reported_as_errors() {
     let root = fixture("async");
     std::fs::write(root.join("lakefile.toml"), "name = \"pending\"\ndefaultTargets = [\"Probe\"]\n[[lean_lib]]\nname = \"Pending\"\n[[lean_lib]]\nname = \"Probe\"\n").unwrap();
@@ -1798,7 +1879,7 @@ fn hotspots_from_a_recording_follow_its_elapsed_times() {
     let dir = root.to_str().unwrap();
     for args in [
         vec![],
-        vec!["--project-dir", dir, "--profile", &uri],
+        vec!["--project-dir", dir, "--profile", &uri, "--detail", "none"],
         vec!["--profile", &uri, "--detail", "steps"],
         vec!["--profile", &uri, "--jobs", "2"],
         vec!["--profile", &uri, "--paths", "Hot.lean"],
@@ -1810,6 +1891,156 @@ fn hotspots_from_a_recording_follow_its_elapsed_times() {
         assert_eq!(cli(&all).status.code(), Some(252), "{all:?}");
     }
     assert_code(&cli(&["profile", "list-hotspots", "help"]), 0);
+}
+
+#[test]
+fn hotspots_resume_validated_checkpoints() {
+    let root = fixture("hotspots");
+    assert_code(&lake_build(&root), 0);
+    let profile = record(&root, 0);
+    let path = root.join("profile.json");
+    let uri = format!("file://{}", path.display());
+    let dir = root.to_str().unwrap();
+    std::fs::write(&path, profile.to_string()).unwrap();
+    let listing = hotspots(
+        &["--profile", &uri, "--project-dir", dir, "--limit", "1"],
+        0,
+    );
+    assert_eq!(listing["Detail"], "steps");
+    assert!(listing["Hotspots"][0].get("Traced").is_some());
+    let untraced = hotspots(&["--profile", &uri, "--limit", "1"], 0);
+    for field in ["Key", "Name", "ElapsedNs", "Heartbeats", "Share"] {
+        assert_eq!(
+            listing["Hotspots"][0][field],
+            untraced["Hotspots"][0][field]
+        );
+    }
+    for field in ["Toolchain", "Conditions", "SourceSha256", "Key"] {
+        let mut changed = profile.clone();
+        match field {
+            "Toolchain" => changed[field] = json!("different Lean"),
+            "Conditions" => changed[field]["Async"] = json!(true),
+            "SourceSha256" => changed["Files"][0][field] = json!("changed"),
+            "Key" => {
+                for file in changed["Files"].as_array_mut().unwrap() {
+                    for command in file["Commands"].as_array_mut().unwrap() {
+                        command["Key"] = json!("different identity");
+                    }
+                }
+            }
+            _ => unreachable!(),
+        }
+        std::fs::write(&path, changed.to_string()).unwrap();
+        let output = cli(&[
+            "profile",
+            "list-hotspots",
+            "--profile",
+            &uri,
+            "--project-dir",
+            dir,
+            "--limit",
+            "1",
+        ]);
+        assert_code(&output, 254);
+        assert!(output.stdout.is_empty(), "{field}");
+    }
+    let mut empty = profile.clone();
+    empty["Files"] = json!([]);
+    std::fs::write(&path, empty.to_string()).unwrap();
+    let listing = hotspots(&["--profile", &uri, "--project-dir", dir], 0);
+    assert!(listing["Hotspots"].as_array().unwrap().is_empty());
+    std::fs::write(&path, profile.to_string()).unwrap();
+    let source = root.join("Hot/Quick.lean");
+    let original = std::fs::read_to_string(&source).unwrap();
+    std::fs::write(&source, format!("{original}\n")).unwrap();
+    let output = cli(&[
+        "profile",
+        "list-hotspots",
+        "--profile",
+        &uri,
+        "--project-dir",
+        dir,
+        "--limit",
+        "1",
+    ]);
+    assert_code(&output, 254);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("source changed since recording"));
+}
+
+#[test]
+fn hotspots_print_traced_timeouts_without_declarations() {
+    let root = fixture("hotspots");
+    std::fs::write(
+        root.join("Hot/Burn.lean"),
+        r#"import Lean
+open Lean Elab Tactic
+elab "burn" : tactic => do
+  for _ in [:8000] do
+    withTraceNode `Burn (fun _ => pure "burn") (pure ())
+  evalTactic (← `(tactic| exact True.intro))
+def demand (proof : True := by burn) : True := proof
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("Hot.lean"),
+        r#"import Hot.Burn
+set_option maxHeartbeats 20 in
+def tracedTimeout : (fun (_ : True) => True) demand := True.intro
+"#,
+    )
+    .unwrap();
+    assert_code(&lake_build(&root), 0);
+    let profile = record(&root, 0);
+    let command = profile["Files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|file| file["Commands"].as_array().unwrap())
+        .find(|command| command["Key"] == "tracedTimeout")
+        .unwrap();
+    assert_eq!(command["HasErrors"], false);
+    let listing = hotspots(
+        &[
+            "--project-dir",
+            root.to_str().unwrap(),
+            "--paths",
+            "Hot.lean",
+            "--limit",
+            "50",
+        ],
+        254,
+    );
+    let row = listing["Hotspots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["Key"] == "tracedTimeout")
+        .unwrap();
+    assert_eq!(row["Name"], "tracedTimeout");
+    assert_eq!(row["HasErrors"], false);
+    assert_eq!(row["Traced"]["HasErrors"], true);
+    let output = cli(&[
+        "profile",
+        "record-profile",
+        "--project-dir",
+        root.to_str().unwrap(),
+        "--paths",
+        "Hot.lean",
+        "--detail",
+        "steps",
+    ]);
+    assert_code(&output, 254);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("maximum number of heartbeats"));
+    let traced: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let failed = traced["Files"][0]["Commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|command| command["HasErrors"] == true)
+        .unwrap();
+    assert_ne!(failed["Key"], "tracedTimeout");
+    assert!(failed["Names"].as_array().unwrap().is_empty());
 }
 
 #[test]

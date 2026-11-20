@@ -312,6 +312,39 @@ pub fn record(options: &Record, targets: Option<&Targets>) -> Result<Profile> {
     })
 }
 
+pub fn validate_checkpoint(profile: &Profile, project_dir: &Path) -> Result<()> {
+    let root = project_dir.canonicalize()?;
+    let toolchain = std::fs::read_to_string(root.join("lean-toolchain"))?;
+    if toolchain.trim() != "leanprover/lean4:v4.35.0" {
+        return Err(Error::target("project must use leanprover/lean4:v4.35.0"));
+    }
+    let version = String::from_utf8(process::checked(Command::new("lean").arg("--version"))?)
+        .map_err(|e| Error::internal(e.to_string()))?;
+    if !version.starts_with("Lean (version 4.35.0,") || profile.toolchain != version.trim() {
+        return Err(Error::target(
+            "--profile: Toolchain differs from project Lean",
+        ));
+    }
+    for file in &profile.files {
+        let path = root.join(&file.path);
+        let mut selected = BTreeSet::new();
+        visit(&root, &path, &mut selected)?;
+        if selected.len() != 1 || !selected.contains(&path.canonicalize()?) {
+            return Err(Error::target(format!(
+                "--profile: invalid source path {}",
+                file.path
+            )));
+        }
+        if sha256(&std::fs::read_to_string(path)?) != file.source_sha256 {
+            return Err(Error::target(format!(
+                "source changed since recording: {}",
+                file.path
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn sha256(source: &str) -> String {
     Sha256::digest(source.as_bytes())
         .iter()

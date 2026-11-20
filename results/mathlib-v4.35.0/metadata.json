@@ -1,0 +1,18 @@
+{
+  "MathlibCommit": "56a005855ea17e0b0958f73ec801ae140b0a1679",
+  "Toolchain": "Lean (version 4.35.0, x86_64-unknown-linux-gnu, commit eb6cafb7290e8bd5f2937522d8d804f58f02bafc, Release)",
+  "LeanwakeCommit": "6eb83067a3f0cb240c715884711cfcfaa5270882",
+  "Jobs": 4,
+  "Limit": 50,
+  "Paths": [],
+  "CpuModel": "Intel(R) Xeon(R) Processor",
+  "Nproc": 4,
+  "StartUtc": "2026-11-19T16:45:21Z",
+  "RecordWallSeconds": 21979.518133134003,
+  "RecordExitCode": 254,
+  "TraceWallSeconds": 300.67726642100024,
+  "TraceExitCode": 254,
+  "EndUtc": "2026-11-19T22:56:41Z",
+  "WallSeconds": 22280.195926008997,
+  "ExitCode": 254
+}
