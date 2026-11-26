@@ -1,6 +1,39 @@
+<p align="center">
+  <img src="docs/assets/banner.png" alt="Leanwake: find which Lean proofs and tactics take the most time" width="880">
+</p>
+
+<p align="center"><strong>Find the slowest proofs in a Lean 4 Lake project and the tactics that take the time</strong></p>
+
+<p align="center">
+  <a href="https://github.com/conao3/rust-leanwake/actions/workflows/ci.yml"><img src="https://github.com/conao3/rust-leanwake/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/conao3/rust-leanwake" alt="License: Apache-2.0"></a>
+  <a href="Cargo.toml"><img src="https://img.shields.io/badge/Rust-edition%202024-orange" alt="Rust edition 2024"></a>
+  <a href="lean-toolchain"><img src="https://img.shields.io/badge/Lean-v4.35.0-blue" alt="Lean v4.35.0"></a>
+  <a href="https://github.com/conao3/rust-leanwake/stargazers"><img src="https://img.shields.io/github/stars/conao3/rust-leanwake?style=flat" alt="GitHub stars"></a>
+</p>
+
+<p align="center">
+  <a href="#installation">Installation</a> |
+  <a href="#find-slow-proofs">Find slow proofs</a> |
+  <a href="#compare">Compare</a> |
+  <a href="#ci-for-a-lean-project">CI</a> |
+  <a href="#verified-rules">Verified rules</a> |
+  <a href="#limitations">Limitations</a> |
+  <a href="#development">Development</a> |
+  <a href="results/mathlib-v4.35.0/README.md">Mathlib results</a>
+</p>
+
 # Leanwake
 
-Leanwake tells you, with one command, which proofs in a Lean 4.35.0 Lake project take the most time and which tactic inside each of them uses that time. It ranks declarations by elaboration time measured without tracing, then elaborates only the listed declarations again under Lean's trace profiler to break their time down by tactic. The same recordings can be saved and compared to detect heartbeat regressions in CI; the comparison rules are defined and proved in Lean and generated into Rust with [leanfran](https://github.com/conao3/lean-leanfran).
+Leanwake tells you, with 1 command, which proofs in a Lean 4.35.0 Lake project take the most time and which tactic inside each of them uses that time. It ranks declarations by elaboration time measured without tracing, then elaborates only the listed declarations again under Lean's trace profiler to break their time down by tactic. You can save the same recordings and compare them to catch heartbeat regressions in CI. The comparison rules are defined and proved in Lean and generated into Rust with [leanfran](https://github.com/conao3/lean-leanfran).
+
+## Highlights
+
+- `profile list-hotspots` ranks the slowest declarations and names the tactic and source range that use their time, such as `decide 6:4-6:18 x1 98.3%`.
+- Ranking and times come from an untraced pass, so tracing overhead doesn't reorder the list. The second pass traces only the files that contain listed declarations.
+- `profile compare-profiles` matches commands by `(Path, Key)` and exits with 254 when a command grows by more than 1,000 heartbeats and 1% (the defaults), so a CI step fails on the regression.
+- 22 theorems in Lean cover matching, classification, aggregation and failure, and the CLI calls the Rust generated from them.
+- Recordings carry their toolchain and measurement conditions, and Leanwake rejects comparisons between recordings made under different conditions.
 
 ## Installation
 
@@ -39,7 +72,7 @@ Seconds  Share  Location          Declaration  Heartbeats  Inside
 
 The first line gives the total elaboration time of all measured commands, the numbers of commands and files, and the share of the total taken by the listed rows. Each row is one top-level command in descending elapsed time: elapsed time in seconds, share of the total, file and start line, declaration name (the first of `Names`, or the command kind for commands that introduce no named declaration), raw heartbeats, and the largest entry of the breakdown. `decide 6:4-6:18 x1 98.3%` means that the `decide` tactic at line 6, columns 4 to 18, ran once and took 98.3% of the declaration's traced time. Lines are one-based, columns zero-based, and end positions exclusive.
 
-The breakdown groups the innermost tactic nodes that carry a source range by tactic kind and range, and sums their time; `x4` means the tactic node at that position ran four times, for example under `<;>` or `all_goals`. When a chain of nodes shares one range, the row names the outermost tactic that is not a tactic sequence. A declaration without tactic nodes, such as a term-mode proof or a definition, shows the trace classes with the most self time (node time minus the time of its retained children) instead, like `Meta.whnf` and `addDecl` above. Breakdown shares are relative to the declaration's time in the traced pass and never add up to more than 100%; the remainder is spent outside the listed tactics, for example in the kernel check of the finished proof.
+The breakdown groups the innermost tactic nodes that carry a source range by tactic kind and range, and sums their time; `x4` means the tactic node at that position ran 4 times, for example under `<;>` or `all_goals`. When a chain of nodes shares 1 range, the row names the outermost tactic that isn't a tactic sequence. A declaration without tactic nodes, such as a term-mode proof or a definition, shows the trace classes with the most self time (node time minus the time of its retained children) instead, like `Meta.whnf` and `addDecl` above. Breakdown shares are relative to the declaration's time in the traced pass and never add up to more than 100%; the remainder is spent outside the listed tactics, for example in the kernel check of the finished proof.
 
 The default is `--limit 10`. JSON, the default output, carries the full data with PascalCase keys: `ElapsedNs`, `Commands`, `Files`, `FilesWithErrors`, `ListedElapsedNs`, `ListedShare` and `Hotspots`. Each hotspot has `Path`, `Module`, `Key`, `Name`, `Kind`, `Range`, `ElapsedNs`, `Share`, `Heartbeats` and `HasErrors`, and with the breakdown a `Traced` object with the traced `ElapsedNs`, `HasErrors` and every `Inside` entry (`Class`, `Kind`, `Range`, `Count`, `ElapsedNs`, `Share`). This excerpt is the hotspot of `--limit 1` on the same fixture, with the other two `Inside` entries omitted:
 
@@ -78,16 +111,16 @@ The default is `--limit 10`. JSON, the default output, carries the full data wit
 }
 ```
 
-`list-hotspots` measures in two passes. The first pass elaborates every selected file without tracing; ranking, times and shares come only from it. Tracing makes elaboration several times slower and changes the order: when the file containing lean-ritsuryo's slowest theorem was recorded alternately, the theorem took 9.3–9.4 s without tracing, 29.3–29.6 s with every trace node captured and 18.1–18.6 s with a 1 ms capture threshold. Heartbeat order differs from time order (a `decide +kernel` theorem is second by time and fifth by heartbeats). The second pass elaborates again only the files that contain listed declarations, stops after the last listed command of each file, and enables the trace profiler only for the listed commands, in time mode with a 1 ms capture threshold; tactic nodes are always kept. For one commit of lean-ritsuryo (54 files, 893 commands, `--jobs 4`), three pairs of runs took 40.5 s, 47.5 s and 47.6 s of wall-clock time for the first pass alone (`--detail none`) and 99.7 s, 72.8 s and 85.3 s for the whole command, an extra 53% to 146%. These are observations on a shared machine, not guarantees.
+`list-hotspots` measures in 2 passes. The first pass elaborates every selected file without tracing; ranking, times and shares come only from it. Tracing makes elaboration several times slower and changes the order: when the file containing lean-ritsuryo's slowest theorem was recorded alternately, the theorem took 9.3–9.4 s without tracing, 29.3–29.6 s with every trace node captured and 18.1–18.6 s with a 1 ms capture threshold. Heartbeat order differs from time order (a `decide +kernel` theorem is second by time and fifth by heartbeats). The second pass elaborates again only the files that contain listed declarations, stops after the last listed command of each file, and enables the trace profiler only for the listed commands, in time mode with a 1 ms capture threshold; tactic nodes are always kept. For one commit of lean-ritsuryo (54 files, 893 commands, `--jobs 4`), 3 pairs of runs took 40.5 s, 47.5 s and 47.6 s of wall-clock time for the first pass alone (`--detail none`) and 99.7 s, 72.8 s and 85.3 s for the whole command, an extra 53% to 146%. These are observations on a shared machine, not guarantees.
 
 Options:
 
 - `--project-dir DIR` measures now. `--paths PATH ...` and `--jobs N` select files and parallel workers as in `record-profile`.
 - `--profile file://profile.json` ranks an existing `--detail none` recording without measuring. It prints the ranking that measuring would print for that recording, without the breakdown.
-- `--profile file://profile.json --project-dir DIR` resumes from an untraced checkpoint and measures only the traced breakdown. The profile must have synchronous, detail-none conditions and the same toolchain as the project; every recorded file's source hash must match. `--jobs` controls tracing; `--paths` is not accepted because the checkpoint selects the files.
+- `--profile file://profile.json --project-dir DIR` resumes from an untraced checkpoint and measures only the traced breakdown. The profile must have synchronous, detail-none conditions and the same toolchain as the project; every recorded file's source hash must match. `--jobs` controls tracing; `--paths` isn't accepted because the checkpoint selects the files.
 - `--detail none|steps` turns the breakdown off or on. It defaults to `steps` with `--project-dir`; `--profile` alone accepts only `none`.
 
-Give at least one of `--project-dir` and `--profile`; otherwise the exit code is 252. Together they require `--detail steps` (the default). Files with errors are reported on standard error, counted in `FilesWithErrors` and make the exit code 254, as does an error that appears only in the traced pass (tracing raises heartbeats, so a proof close to `maxHeartbeats` can fail there); the listing is still printed. Traced rows match by path and command start after checking the source hash. An errored traced command may lack the original declaration name; the listing retains the untraced key, name and ranking and marks `Traced.HasErrors=true`. Changed source and different keys on error-free traced commands are rejected.
+Give `--project-dir`, `--profile` or both; otherwise the exit code is 252. Together they require `--detail steps` (the default). Files with errors are reported on standard error, counted in `FilesWithErrors` and make the exit code 254, as does an error that appears only in the traced pass (tracing raises heartbeats, so a proof close to `maxHeartbeats` can fail there); the listing is still printed. Traced rows match by path and command start after checking the source hash. An errored traced command may lack the original declaration name; the listing retains the untraced key, name and ranking and marks `Traced.HasErrors=true`. Changed source and different keys on error-free traced commands are rejected.
 
 ### Mathlib checkpoints
 
@@ -148,7 +181,7 @@ ElapsedNs	Heartbeats	Path	Key	HasErrors
 7383216	50440	Steps.lean	heavy	false
 ```
 
-`list-commands` lists commands in descending elapsed time with their heartbeats; its JSON output carries each command's full record. By default, recording selects Lake's default target modules and their transitive imports inside the project. Use `--paths File.lean Directory` to choose files and directory trees relative to the project root. Hidden paths and symbolic links are excluded. Dependencies are prepared serially, then up to `--jobs` files are measured concurrently; the default is one worker.
+`list-commands` lists commands in descending elapsed time with their heartbeats; its JSON output carries each command's full record. By default, recording selects Lake's default target modules and their transitive imports inside the project. Use `--paths File.lean Directory` to choose files and directory trees relative to the project root. Hidden paths and symbolic links are excluded. Dependencies are prepared serially, then up to `--jobs` files are measured concurrently; the default is 1 worker.
 
 ```sh
 nix run github:conao3/rust-leanwake -- profile list-files \
@@ -160,7 +193,7 @@ Path	Module	Commands	Heartbeats	ElapsedNs	HasErrors
 Steps.lean	Steps	12	708097	224743642	false
 ```
 
-`--output-file` writes a JSON profile and leaves standard output empty. Without it, the profile is written to standard output; `--output text|table` selects a file summary instead. An error in one source is recorded with `HasErrors`; independent files continue. A process supervisor stops each subprocess group after completion or failure and when the host exits, including SIGINT, SIGTERM and SIGKILL. Processes deliberately detached into a separate process group are outside this lifecycle.
+`--output-file` writes a JSON profile and leaves standard output empty. Without it, the profile is written to standard output; `--output text|table` selects a file summary instead. An error in 1 source is recorded with `HasErrors`; independent files continue. A process supervisor stops each subprocess group after completion or failure and when the host exits, including SIGINT, SIGTERM and SIGKILL. Processes deliberately detached into a separate process group are outside this lifecycle.
 
 ## Compare
 
@@ -195,7 +228,7 @@ head - base > absolute-threshold-heartbeats
 (head - base) * 100 > base * relative-threshold-percent
 ```
 
-Defaults are **1,000 heartbeats and 1%**. Improvement uses the same rule with base and head exchanged. Thresholds are nonnegative 64-bit integers; intermediate products and totals use arbitrary precision natural numbers. Equality at either threshold is unchanged. Added or removed commands alone do not fail CI.
+Defaults are **1,000 heartbeats and 1%**. Improvement uses the same rule with base and head exchanged. Thresholds are nonnegative 64-bit integers; intermediate products and totals use arbitrary precision natural numbers. Equality at either threshold is unchanged. Added or removed commands alone don't fail CI.
 
 JSON output contains `Summary`, `Thresholds` and `Commands`. Unchanged rows are omitted; regressions come first, sorted by descending heartbeat increase. Missing counts are null, with zero used for their delta. The displayed range comes from head, or base for removals. Differing toolchains or conditions, unsupported schema versions, errored profiles and duplicate `(Path, Key)` identities are rejected before comparison results are emitted. Detail steps comparisons use command totals, not sums of trace nodes.
 
@@ -260,17 +293,17 @@ ElapsedNs	Depth	Range	Class	Kind
 1596162	2	-	Elab.step	-
 ```
 
-Each command's `Steps` is a trace forest. Nodes contain `Class`, `ElapsedNs`, `Range` and `Children`; tactic nodes also contain `Kind`, the Lean syntax kind. Capture uses `trace.profiler.useHeartbeats=false`, so node times come from Lean's monotonic clock. `Leanwake.tactic` nodes preserve syntax positions by wrapping tactic elaborators, including newly registered elaborators in the measured file. Two occurrences of the same tactic on different lines remain distinct. Macro expansion may produce several nested nodes at the same source range. Nodes without retained source syntax have a null range.
+Each command's `Steps` is a trace forest. Nodes contain `Class`, `ElapsedNs`, `Range` and `Children`; tactic nodes also contain `Kind`, the Lean syntax kind. Capture uses `trace.profiler.useHeartbeats=false`, so node times come from Lean's monotonic clock. `Leanwake.tactic` nodes preserve syntax positions by wrapping tactic elaborators, including newly registered elaborators in the measured file. 2 occurrences of the same tactic on different lines remain distinct. Macro expansion may produce several nested nodes at the same source range. Nodes without retained source syntax have a null range.
 
-`--step-threshold-ns N` keeps nodes of at least N nanoseconds; the default is **100,000** (0.1 ms). `Leanwake.tactic` nodes are always kept. Retained children of omitted nodes are promoted to the nearest retained ancestor. Capture uses a zero threshold and filtering happens after measurement, so changing the output threshold does not change the measured command cost. `Depth` in `list-steps` is the depth of the retained tree, with roots at zero. Equal-cost nodes retain traversal order.
+`--step-threshold-ns N` keeps nodes of at least N nanoseconds; the default is **100,000** (0.1 ms). `Leanwake.tactic` nodes are always kept. Retained children of omitted nodes are promoted to the nearest retained ancestor. Capture uses a zero threshold and filtering happens after measurement, so changing the output threshold doesn't change the measured command cost. `Depth` in `list-steps` is the depth of the retained tree, with roots at zero. Equal-cost nodes retain traversal order.
 
-Trace costs include their children. Adding all nodes double-counts nested work; use the command's `Heartbeats` for comparison. Trace collection adds elaboration work, so `Detail=none` and `Detail=steps` recordings cannot be compared, and `list-hotspots --profile` accepts only `Detail=none`. `list-steps` returns 254 for detail none or an unknown path/key.
+Trace costs include their children. Adding all nodes double-counts nested work; use the command's `Heartbeats` for comparison. Trace collection adds elaboration work, so `Detail=none` and `Detail=steps` recordings can't be compared, and `list-hotspots --profile` accepts only `Detail=none`. `list-steps` returns 254 for detail none or an unknown path/key.
 
 ## Measurement and reproducibility
 
 The native adapter imports a file's dependencies, parses each top-level command, and measures `Command.elabCommandTopLevel` between calls to `IO.getNumHeartbeats` and `IO.monoNanosNow`. Elaboration runs synchronously with `Elab.async=false`, including source-level `set_option` overrides and nested `elabCommand` calls from custom command elaborators. An unfinished registered elaboration task marks the command and file as errored, reports a diagnostic, and stops the file. Detached tasks created outside Lean's snapshot registry are outside the measurement contract. Each source file has its own adapter process. Module linters receive the parsed command sequence, and terminal diagnostics contribute to file errors. Imported and `weak.` options are reparsed using Lean's frontend before measurement overrides are applied. Command time excludes parsing, imports, name discovery, hashing and JSON serialization; import time is recorded separately.
 
-Heartbeats count small allocations on the elaborating thread. They are neither elapsed time nor allocated bytes. One unit of Lean's `maxHeartbeats` corresponds to **1,000 raw heartbeats** in a profile. Project heartbeat limits remain in effect. Recording executes elaborators and `#eval` actions as compilation does.
+Heartbeats count small allocations on the elaborating thread. They are neither elapsed time nor allocated bytes. 1 unit of Lean's `maxHeartbeats` corresponds to **1,000 raw heartbeats** in a profile. Project heartbeat limits remain in effect. Recording executes elaborators and `#eval` actions as compilation does.
 
 `Names` lists newly introduced constants with declaration ranges, ordered by range start and then name. `Key` is the first name when present. Otherwise it is:
 
@@ -280,7 +313,7 @@ Heartbeats count small allocations on the elaborating thread. They are neither e
 
 The hash covers the command syntax's UTF-8 source, excluding surrounding trivia. Occurrences are one-based within a file for identical kind and source. Paths are relative to the project root. Lines are one-based, columns zero-based, and end positions are exclusive.
 
-Repeated recordings of unchanged real projects on four cores produced:
+Repeated recordings of unchanged real projects on 4 cores produced:
 
 | Project / selection | Files | Commands | Maximum command heartbeat difference | Recording time | Lake build |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -289,7 +322,7 @@ Repeated recordings of unchanged real projects on four cores produced:
 | leanassay / default | 8 | 133 | 0 | 14.1–17.7 s | 23.0 s |
 | leanassay / all | 30 | 253 | 137 | 199.4–248.2 s | 147.5 s |
 
-All files had `HasErrors=false`. Small remaining differences are preserved, rather than rounded away. The deterministic integration fixture matches exactly; this is not a guarantee for arbitrary Lean metaprograms. Lean's lazy realization and kernel replay use additional internal mechanisms beyond the top-level async switch, and the precise source of the remaining variation is not isolated. Another pair of leanassay / all recordings differed by at most 183. The default absolute threshold of 1,000 exceeds every observed difference, while the relative threshold also requires a change above 1%.
+All files had `HasErrors=false`. Small remaining differences are preserved, rather than rounded away. The deterministic integration fixture matches exactly; this isn't a guarantee for arbitrary Lean metaprograms. Lean's lazy realization and kernel replay use additional internal mechanisms beyond the top-level async switch, and the precise source of the remaining variation isn't isolated. Another pair of leanassay / all recordings differed by at most 183. The default absolute threshold of 1,000 exceeds every observed difference, while the relative threshold also requires a change above 1%.
 
 ## Verified rules
 
@@ -297,12 +330,12 @@ The source is [`src/rules.rs`](src/rules.rs). `leanfran` extracts it into `lean/
 
 | Theorems | Property |
 | --- | --- |
-| `grows_lt`, `grows_asymmetric` | Growth implies an increase and cannot hold in both directions. |
+| `grows_lt`, `grows_asymmetric` | Growth implies an increase and can't hold in both directions. |
 | `classify_regressed`, `classify_improved` | Classification agrees with the growth predicate. |
 | `equal_unchanged` | Equal counts are unchanged. |
 | `swap_classification` | Swapping inputs swaps regression and improvement. |
 | `regression_monotone` | Increasing head preserves regression. |
-| `grows_thresholds`, `regression_thresholds`, `improvement_thresholds` | Raising thresholds cannot introduce growth, regression or improvement. |
+| `grows_thresholds`, `regression_thresholds`, `improvement_thresholds` | Raising thresholds can't introduce growth, regression or improvement. |
 | `takeMatch_conservation` | Taking a match preserves all head entries. |
 | `matching_base_once`, `matching_head_once` | Every input occurrence appears exactly once in the result. |
 | `matching_files_base_once`, `matching_files_head_once` | File grouping preserves every base and head occurrence exactly once. |
@@ -370,21 +403,21 @@ With `Detail=steps`, every command additionally has `Steps: [...]`, whose nodes 
 | Code | Meaning |
 | ---: | --- |
 | 0 | Successful listing or recording, or a comparison without regressions. |
-| 252 | Invalid command syntax or parameter, including malformed input JSON and `list-hotspots` without exactly one of `--project-dir` and `--profile`. |
+| 252 | Invalid command syntax or parameter, including malformed input JSON and `list-hotspots` without either `--project-dir` or `--profile`. |
 | 254 | Project/source error, incompatible or invalid profile, unknown step selection, or detected regression. |
 | 255 | Host I/O failure, missing runtime configuration, or invalid adapter protocol. |
 
 ## Limitations
 
-- The project must declare `leanprover/lean4:v4.35.0`. Different toolchain recordings cannot be compared.
+- The project must declare `leanprover/lean4:v4.35.0`. Recordings from different toolchains can't be compared.
 - Lake's module setup, options, plugins and `-Dname=value` arguments are supported. Other `weakLeanArgs` or `moreLeanArgs` are rejected explicitly.
-- Measurements are top-level command costs. A command introducing multiple declarations has one cost and a list of names; it is not split into individual kernel declarations.
+- Measurements are top-level command costs. A command introducing multiple declarations has 1 cost and a list of names. Leanwake doesn't split it into individual kernel declarations.
 - Elapsed time depends on machine load; the shares and the order of clearly separated declarations are more stable than the absolute times. Declarations with similar times can change places between runs.
-- The breakdown covers time inside tactic nodes, or the self time of trace classes for declarations without tactics. Work outside them, such as the kernel check of a finished tactic proof, appears only as the part of the share that the listed entries do not cover.
+- The breakdown covers time inside tactic nodes, or the self time of trace classes for declarations without tactics. Work outside them, such as the kernel check of a finished tactic proof, appears only as the part of the share that the listed entries don't cover.
 - Trace locations depend on retained syntax. Generated tactic syntax can share its macro call's range, and many internal trace classes have no position.
 - Very detailed recordings can require substantial memory and disk space. The output threshold reduces retained JSON, but all trace capture still runs.
 - Time-based regression gates, graphs, cross-toolchain comparison and Mathlib-scale profiling are outside this release's validated scope.
-- Linux is exercised in the integration tests. The flake defines an Apple Silicon package, but macOS execution has not been validated.
+- Linux is exercised in the integration tests. The flake defines an Apple Silicon package, but macOS execution hasn't been validated.
 
 ## Related tools
 
