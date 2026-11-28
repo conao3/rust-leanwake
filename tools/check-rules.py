@@ -47,6 +47,8 @@ def main():
             run(
                 [
                     os.environ["LEANFRAN_CLI"],
+                    "--lang",
+                    "rust",
                     "module",
                     "generate",
                     "--batch",

@@ -8,7 +8,7 @@ description = "Find the slowest proofs in Lean 4.35.0 Lake projects and compare 
 repository = "https://github.com/conao3/rust-leanwake"
 
 [dependencies]
-leanfran = { version = "=0.6.0", default-features = false }
+leanfran = { version = "=0.14.0", default-features = false }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["arbitrary_precision", "unbounded_depth"] }
@@ -17,4 +17,4 @@ libc = "0.2"
 serde_stacker = "0.1.14"
 
 [build-dependencies]
-leanfran-build = "=0.6.0"
+leanfran-build = "=0.14.0"

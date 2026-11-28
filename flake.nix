@@ -2,7 +2,7 @@
   description = "Leanwake: find the slowest proofs in Lake projects";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    leanfran.url = "github:conao3/lean-leanfran/1bb464c6d419da8037698053f52dd23476a042d9";
+    leanfran.url = "github:conao3/lean-leanfran/420a7dce66dda3cbfd03b884d453cb8de63a0fc6";
     leanfran.inputs.nixpkgs.follows = "nixpkgs";
     flake-parts.url = "github:hercules-ci/flake-parts";
     treefmt-nix = {
@@ -85,7 +85,7 @@
           };
           devShells.default = pkgs.mkShell {
             packages = [
-              inputs.leanfran.packages.${system}.rust-compiler
+              inputs.leanfran.packages.${system}.leanfran
               pkgs.cargo
               pkgs.rustc
               pkgs.rustfmt
@@ -97,7 +97,7 @@
               pkgs.ruff
             ];
             LEAN_SYSROOT = "${lean}";
-            LEANFRAN_CLI = "${inputs.leanfran.packages.${system}.rust-compiler}/bin/leanfran";
+            LEANFRAN_CLI = "${inputs.leanfran.packages.${system}.leanfran}/bin/leanfran";
             shellHook = ''export LEANWAKE_ADAPTER="$PWD/native/.lake/build/bin/leanwake-adapter"'';
           };
           treefmt.flakeFormatter = false;
